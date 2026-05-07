@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Example terraform.auto.tfvars for the cloudfront-static-content consumer.
+#
+# Copy to `terraform.auto.tfvars` and adjust values to match your sandbox /
+# dev profile. All values below are non-sensitive; do NOT add secrets to
+# this file. Sensitive inputs should flow through HCP Terraform variable
+# sets (workspace or project scope), not committed `.tfvars` files.
+#
+# Every variable below is optional except `owner`. Defaults from
+# `variables.tf` apply for any value left commented out.
+# ---------------------------------------------------------------------------
+
+# Required — owning team or individual; populates default_tags.Owner.
+owner = "platform-team"
+
+# Project identifier — used in resource names and default_tags.Project.
+# 3-32 lowercase alphanumeric or hyphen characters.
+project_name = "consumer-cloudfront-demo"
+
+# Deployment tier — one of dev, test, staging, prod.
+environment = "dev"
+
+# Prefix applied to the S3 bucket name and CloudFront comment.
+# Lowercase alphanumeric and hyphens only.
+name_prefix = "demo-cloudfront"
+
+# Extra tags merged into module tags inputs (provider default_tags layer
+# on top automatically).
+tags = {
+  CostCentre = "engineering-sandbox"
+  Workload   = "cloudfront-demo"
+}
+
+# AWS region for the S3 origin bucket. CloudFront + alarms are always
+# deployed via the us-east-1 provider alias regardless of this value.
+aws_region_origin = "ap-southeast-2"
+
+# CloudFront edge coverage tier — PriceClass_100 is the cheapest sandbox
+# footprint (US/CA/EU edges only). Use PriceClass_200 or PriceClass_All
+# for global demo audiences.
+cloudfront_price_class = "PriceClass_100"
+
+# Skip the 5-15 minute CloudFront propagation wait at apply time. Sandbox
+# iteration default; flip to true for production-style runs.
+cloudfront_wait_for_deployment = false
+
+# Object served at the distribution root.
+default_root_object = "index.html"
+
+# Alarm thresholds (percent). Sandbox-friendly: lenient 4xx threshold so
+# 404s on missing demo assets do not generate alarm noise.
+alarm_5xx_threshold = 5
+alarm_4xx_threshold = 25
+
+# Alarm shape — 2 consecutive periods of 300s each = 10-minute decision
+# window aligned with CloudFront's 5-minute metric aggregation cadence.
+alarm_evaluation_periods = 2
+alarm_period_seconds     = 300
