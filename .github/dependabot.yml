@@ -1,0 +1,18 @@
+version: 2
+registries:
+  terraform-private:
+    type: terraform-registry
+    url: https://app.terraform.io
+    token: ${{ secrets.TFE_TOKEN_DEPENDABOT }}
+updates:
+  - package-ecosystem: terraform
+    directory: "/"
+    schedule:
+      interval: monthly
+    registries:
+      - terraform-private
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "build(deps)"

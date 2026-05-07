@@ -1,0 +1,112 @@
+name: Deploy SDD Playground Redirect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/playground-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Set trimmed secrets
+        id: vars
+        run: |
+          echo "team_id=$(echo '${{ secrets.VERCEL_ORG_ID }}' | xargs)" >> "$GITHUB_OUTPUT"
+          echo "project_id=$(echo '${{ secrets.VERCEL_PROJECT_ID }}' | xargs)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy redirect via Vercel API
+        id: deploy
+        run: |
+          REDIRECT_HTML=$(cat <<'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0;url=https://pages.github.ibm.com/AdvArch/tfai/">
+            <title>Redirecting…</title>
+          </head>
+          <body style="background:#0a0a12;color:#e0dfe6;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh">
+            <p>Redirecting to <a href="https://pages.github.ibm.com/AdvArch/tfai/" style="color:#00f0ff">pages.github.ibm.com/AdvArch/tfai</a>…</p>
+          </body>
+          </html>
+          HTMLEOF
+          )
+
+          FILE_CONTENT=$(echo "$REDIRECT_HTML" | base64 -w 0)
+          VERCEL_JSON=$(echo '{"rewrites":[{"source":"/","destination":"/index.html"}]}' | base64 -w 0)
+
+          RESPONSE=$(curl -s --fail-with-body -X POST \
+            "https://api.vercel.com/v13/deployments?teamId=${{ steps.vars.outputs.team_id }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d @- << PAYLOAD
+          {
+            "name": "vercel-iac-content",
+            "target": "production",
+            "projectSettings": {
+              "framework": null
+            },
+            "files": [
+              {
+                "file": "index.html",
+                "data": "$FILE_CONTENT",
+                "encoding": "base64"
+              },
+              {
+                "file": "vercel.json",
+                "data": "$VERCEL_JSON",
+                "encoding": "base64"
+              }
+            ]
+          }
+          PAYLOAD
+          )
+
+          DEPLOY_URL=$(echo "$RESPONSE" | jq -r '.url')
+          DEPLOY_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "deploy_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+          echo "Deployed to: https://$DEPLOY_URL"
+          echo "Deployment ID: $DEPLOY_ID"
+
+      - name: Wait for deployment to be ready
+        run: |
+          DEPLOY_ID="${{ steps.deploy.outputs.deploy_id }}"
+          TEAM_ID="${{ steps.vars.outputs.team_id }}"
+          for i in $(seq 1 30); do
+            STATE=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+              "https://api.vercel.com/v13/deployments/$DEPLOY_ID?teamId=$TEAM_ID" \
+              | jq -r '.readyState')
+            echo "Attempt $i: readyState=$STATE"
+            if [ "$STATE" = "READY" ]; then
+              exit 0
+            elif [ "$STATE" = "ERROR" ] || [ "$STATE" = "CANCELED" ]; then
+              echo "::error::Deployment entered $STATE state"
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::Timed out waiting for deployment to be ready"
+          exit 1
+
+      - name: Reassign tfai.vercel.app alias
+        run: |
+          DEPLOY_ID="${{ steps.deploy.outputs.deploy_id }}"
+          HTTP_CODE=$(curl -s -o /tmp/alias_response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"alias": "tfai.vercel.app"}' \
+            "https://api.vercel.com/v2/deployments/$DEPLOY_ID/aliases?teamId=${{ steps.vars.outputs.team_id }}")
+          echo "HTTP status: $HTTP_CODE"
+          cat /tmp/alias_response.json | jq . 2>/dev/null || cat /tmp/alias_response.json
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Alias assignment failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "Alias tfai.vercel.app reassigned to deployment $DEPLOY_ID"

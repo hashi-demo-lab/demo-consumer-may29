@@ -1,0 +1,279 @@
+name: "Terraform Apply (Post-Merge)"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.tf"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+
+env:
+  # tfc-workflows-github actions read these env vars automatically
+  TF_API_TOKEN: ${{ secrets.TFE_TOKEN }}
+  TF_CLOUD_ORGANIZATION: "hashi-demos-apj"
+  TF_WORKSPACE: "terraform-agentic-workflows-demo01"
+
+jobs:
+  apply:
+    name: "Apply to HCP Terraform"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # ── Apply via TFC API (replaces CLI terraform init + apply) ──
+      - name: Upload Configuration
+        id: upload
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        continue-on-error: true
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: "."
+
+      - name: Create Run
+        id: run
+        if: steps.upload.outputs.status == 'Success'
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        continue-on-error: true
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          message: "Apply from merge to main (${{ github.sha }})"
+
+      - name: Apply Run
+        id: apply
+        if: steps.run.outputs.status == 'Success'
+        uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.3.2
+        continue-on-error: true
+        with:
+          run: ${{ steps.run.outputs.run_id }}
+          comment: "Auto-applied from post-merge workflow (commit: ${{ github.sha }})"
+
+      - name: Determine apply result
+        id: result
+        if: always()
+        run: |
+          UPLOAD_STATUS="${{ steps.upload.outputs.status }}"
+          RUN_STATUS="${{ steps.run.outputs.status }}"
+          RUN_RUN_STATUS="${{ steps.run.outputs.run_status }}"
+          APPLY_STATUS="${{ steps.apply.outputs.status }}"
+          RUN_LINK="${{ steps.run.outputs.run_link }}"
+
+          echo "run_link=${RUN_LINK}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$UPLOAD_STATUS" != "Success" ]]; then
+            echo "exitcode=1" >> "$GITHUB_OUTPUT"
+            echo "error_detail=Configuration upload failed" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Apply Failed (Configuration Upload Error)"
+              echo ""
+              echo "Failed to upload configuration to HCP Terraform."
+            } >> "$GITHUB_STEP_SUMMARY"
+
+          elif [[ "$RUN_STATUS" != "Success" ]]; then
+            echo "exitcode=1" >> "$GITHUB_OUTPUT"
+            echo "error_detail=Plan failed with run status: ${RUN_RUN_STATUS}" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Apply Failed (Plan Error)"
+              echo ""
+              echo "The plan phase failed with status: \`${RUN_RUN_STATUS}\`."
+              if [[ -n "$RUN_LINK" ]]; then
+                echo ""
+                echo ":link: [View TFC Run](${RUN_LINK})"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+          elif [[ "$RUN_RUN_STATUS" == "applied" ]]; then
+            # Auto-apply was enabled on the workspace
+            echo "exitcode=0" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Apply Successful (Auto-Apply)"
+              echo ""
+              echo "Infrastructure changes applied successfully via workspace auto-apply."
+              if [[ -n "$RUN_LINK" ]]; then
+                echo ""
+                echo ":link: [View TFC Run](${RUN_LINK})"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+          elif [[ "$APPLY_STATUS" == "Success" || "$APPLY_STATUS" == "Noop" ]]; then
+            echo "exitcode=0" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Apply Successful"
+              echo ""
+              echo "Infrastructure changes applied successfully."
+              if [[ -n "$RUN_LINK" ]]; then
+                echo ""
+                echo ":link: [View TFC Run](${RUN_LINK})"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+          else
+            echo "exitcode=1" >> "$GITHUB_OUTPUT"
+            echo "error_detail=Apply failed with status: ${APPLY_STATUS}" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Apply Failed"
+              echo ""
+              echo "The apply phase failed with status: \`${APPLY_STATUS}\`."
+              if [[ -n "$RUN_LINK" ]]; then
+                echo ""
+                echo ":link: [View TFC Run](${RUN_LINK})"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Find merged PR
+        id: find-pr
+        if: always()
+        run: |
+          MERGE_COMMIT="${{ github.sha }}"
+          PR_NUMBER=$(gh pr list --state merged --json number,mergeCommit \
+            --jq ".[] | select(.mergeCommit.oid == \"${MERGE_COMMIT}\") | .number" 2>/dev/null || echo "")
+
+          if [[ -z "$PR_NUMBER" ]]; then
+            # Fallback: find PR by commit message
+            PR_NUMBER=$(git log -1 --format="%s" | grep -oP '#\K[0-9]+' || echo "")
+          fi
+
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # On success: comment on merged PR
+      - name: Comment apply success
+        if: steps.result.outputs.exitcode == '0' && steps.find-pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runLink = '${{ steps.result.outputs.run_link }}';
+            let body = `### ✅ Apply Successful\n\nThe Terraform changes from this PR have been applied successfully to HCP Terraform.\n\n**Commit**: \`${context.sha}\`\n**Workflow Run**: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+            if (runLink) {
+              body += `\n:link: [TFC Run](${runLink})`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.find-pr.outputs.pr_number }},
+              body: body
+            });
+
+      # On failure: comment error, create incident issue, generate rollback PR
+      - name: Comment apply failure
+        if: steps.result.outputs.exitcode != '0' && steps.find-pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runLink = '${{ steps.result.outputs.run_link }}';
+            const errorDetail = '${{ steps.result.outputs.error_detail }}';
+            let body = `### ❌ Apply Failed\n\nThe Terraform apply for this PR failed.\n\n**Commit**: \`${context.sha}\`\n**Workflow Run**: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n**Error**: ${errorDetail}`;
+            if (runLink) {
+              body += `\n\nView the full error details in HCP Terraform: [:link: View Run](${runLink})`;
+            }
+            body += `\n\nAn incident issue and rollback PR have been created.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.find-pr.outputs.pr_number }},
+              body: body
+            });
+
+      - name: Create incident issue
+        if: steps.result.outputs.exitcode != '0'
+        id: incident
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ steps.find-pr.outputs.pr_number }}' || 'unknown';
+            const runLink = '${{ steps.result.outputs.run_link }}';
+            const errorDetail = '${{ steps.result.outputs.error_detail }}';
+            const workflowUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let body = `## Apply Failure Incident\n\n`;
+            body += `| Field | Value |\n|-------|-------|\n`;
+            body += `| Merge Commit | \`${context.sha}\` |\n`;
+            body += `| Source PR | #${prNumber} |\n`;
+            body += `| Workflow Run | [${context.runId}](${workflowUrl}) |\n`;
+            if (runLink) {
+              body += `| TFC Run | [:link: View Run](${runLink}) |\n`;
+            }
+            body += `| Error | ${errorDetail} |\n`;
+            body += `\n### Recovery Steps\n\n`;
+            body += `1. Review the apply error in `;
+            if (runLink) {
+              body += `[HCP Terraform](${runLink})`;
+            } else {
+              body += `the [workflow run](${workflowUrl})`;
+            }
+            body += `\n2. Check the HCP Terraform workspace for partial state\n`;
+            body += `3. A rollback PR has been created — review and merge if appropriate\n`;
+            body += `4. If the rollback PR is not suitable, manually fix the issue\n`;
+            body += `\n### Rollback PR\n\nA draft rollback PR reverting commit \`${context.sha}\` will be created automatically.\n\ncc @${context.repo.owner}`;
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[INCIDENT] Apply failure after merge of PR #${prNumber}`,
+              body: body,
+              labels: ['incident:apply-failure', 'priority:high']
+            });
+
+            core.setOutput('issue_number', issue.number);
+
+      - name: Create rollback PR
+        if: steps.result.outputs.exitcode != '0'
+        run: |
+          PR_NUMBER="${{ steps.find-pr.outputs.pr_number }}"
+          MERGE_SHA="${{ github.sha }}"
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create revert branch
+          ROLLBACK_BRANCH="rollback/revert-${MERGE_SHA:0:8}"
+          git checkout -b "$ROLLBACK_BRANCH"
+
+          # Revert the merge commit
+          if git revert --no-edit "$MERGE_SHA"; then
+            git push -u origin "$ROLLBACK_BRANCH"
+
+            # Create draft PR
+            gh pr create \
+              --title "[ROLLBACK] Revert merge commit from PR #${PR_NUMBER}" \
+              --body "$(cat <<PRBODY
+          ## Rollback PR
+
+          This PR reverts the changes from PR #${PR_NUMBER} (commit \`${MERGE_SHA}\`) due to an apply failure.
+
+          **Incident issue**: #${{ steps.incident.outputs.issue_number }}
+
+          ### Important
+          - This is a **draft** PR — review before merging
+          - This PR will go through the normal uplift pipeline (classify, validate, plan)
+          - Verify the revert plan looks correct before approving
+
+          ---
+          *Auto-generated by the terraform-apply workflow on apply failure.*
+          PRBODY
+          )" \
+              --draft \
+              --label "rollback"
+          else
+            echo "Warning: Could not revert commit ${MERGE_SHA}. Manual intervention required." >&2
+            gh issue comment "${{ steps.incident.outputs.issue_number }}" \
+              --body "⚠️ Automatic revert failed (likely due to merge conflicts). Manual rollback is required."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

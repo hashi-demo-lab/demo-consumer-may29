@@ -1,0 +1,23 @@
+{
+  "skill_name": "gh-workflow",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need to create a GitHub issue for a bug we found — the Terraform plan is failing because the S3 bucket module is using a deprecated ACL parameter. Title it something like 'Bug: S3 module deprecated ACL' and label it as a bug. Then create a branch linked to that issue so I can start fixing it.",
+      "expected_output": "Uses `gh issue create` with title, body, and --label bug. Captures the issue number. Creates a branch with the NNN-short-name convention tied to that issue number. Pushes the branch with -u.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I've just finished implementing the VPC subnet changes in modules/vpc/main.tf and modules/vpc/variables.tf. Commit these two files with a proper conventional commit message, push the branch, and then post a progress comment on issue #1 saying the implementation phase is complete and all 3 subnets are configured.",
+      "expected_output": "Stages exactly the two named files with `git add`. Commits with a conventional message like `feat(vpc): ...`. Pushes with `git push`. Posts a structured progress comment on issue #1 using `gh issue comment` with status complete.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Can you check what open issues we have labeled 'bug', and then add a comment to issue #1 saying we're starting investigation on the reported problem? Also close issue #2 with a comment that it was resolved in PR #5.",
+      "expected_output": "Lists open bug issues with `gh issue list --label bug --state open`. Comments on issue #1 using `gh issue comment` with a started/investigation message. Closes issue #2 with `gh issue close 2 --comment` referencing PR #5.",
+      "files": []
+    }
+  ]
+}

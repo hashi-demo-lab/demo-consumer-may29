@@ -1,0 +1,64 @@
+{
+  "skill_name": "tf-runtask-skill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Check the run tasks for run-iURWDL3wVxzefsjo",
+      "expected_output": "A structured markdown showing the post-plan task stage with Apptio-Cloudability task result including outcomes (Estimation, Policy, Recommendation)",
+      "files": [],
+      "assertions": [
+        "The Tier 1 summary line shows explicit counts: Total tasks: 1, with passed/failed/errored breakdown",
+        "A Tier 2 markdown table shows the Apptio-Cloudability task with status 'failed', enforcement 'advisory', and the cost diff message (Total Cost before/after)",
+        "The stage is identified as post_plan or Post-Plan with overall stage status 'passed' (stage passed despite advisory failure)",
+        "The script scripts/get-run-task-results.sh was executed and the saved JSON artifact contains run_id matching the input run ID",
+        "Outcomes are shown: Estimation (Passed), Policy (Failed), and Recommendation (Passed)",
+        "The output includes actionable detail from outcome bodies — such as policy violations (e.g. missing tags, wrong instance type), cost impact, or optimization recommendations",
+        "Run metadata from MCP get_run_details is included — such as run status, trigger source, or whether the run has been applied"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "What did the run tasks say for https://app.terraform.io/app/hashi-demos-apj/workspaces/terraform-agentic-workflows-demo01/runs/run-iURWDL3wVxzefsjo",
+      "expected_output": "Same structured output as eval 1, but the skill correctly parses the run ID from the full URL",
+      "files": [],
+      "assertions": [
+        "The run ID 'run-iURWDL3wVxzefsjo' was correctly extracted from the URL",
+        "The script scripts/get-run-task-results.sh was called with the URL and produced valid JSON output",
+        "The output shows task results in a structured format with columns for Task Name, Status, and Enforcement",
+        "The Apptio-Cloudability task and its failed/advisory status are displayed",
+        "The cost information from the message field is presented",
+        "Outcomes for the task result are shown with their status tags",
+        "Run metadata from MCP get_run_details is included — such as run status, trigger source, or whether the run has been applied"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Show me the run task results for run-NONEXISTENT12345",
+      "expected_output": "An error message indicating the run was not found or the API returned a 404, including the run ID in the error",
+      "files": [],
+      "assertions": [
+        "The script was executed with the invalid run ID run-NONEXISTENT12345",
+        "The output clearly communicates that the run was not found or an error occurred",
+        "The error message includes the specific run ID 'run-NONEXISTENT12345'",
+        "The error does not crash silently — it provides actionable feedback",
+        "No fabricated task results are shown",
+        "The script exits with a non-zero exit code (the error is propagated, not swallowed)"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Check the run task results for run-hGthAq8Kuv5wcKZq in the hashi-demos-apj org. If there are no run tasks, let me know.",
+      "expected_output": "Either structured run task results if the run has tasks, or a clear message that the run has no run tasks configured. The skill should handle both cases gracefully.",
+      "files": [],
+      "assertions": [
+        "The script scripts/get-run-task-results.sh was executed with the run ID",
+        "If the run has zero total_tasks in the summary, the output clearly states no run tasks produced results or no run tasks are configured",
+        "If task_stages is non-empty, the output shows the stage name and status",
+        "The Tier 1 summary line with explicit numeric counts (Total tasks: 0, Passed: 0, Failed: 0) appears in the user-facing response, not just in the raw JSON — even though all counts are zero",
+        "No errors or crashes occurred during execution",
+        "The output distinguishes between 'no task stages' and 'task stages exist but have zero results'",
+        "Run metadata from MCP get_run_details is included to provide lifecycle context for the run"
+      ]
+    }
+  ]
+}

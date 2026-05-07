@@ -1,0 +1,208 @@
+name: Kit Release
+
+on:
+  push:
+    tags:
+      - "kit-v*.*.*"
+      - "claudecode-v*.*.*"
+      - "copilot-v*.*.*"
+      - "codex-v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1: Parse tag to extract version and determine harness matrix
+  # -------------------------------------------------------------------
+  parse-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      harnesses: ${{ steps.parse.outputs.harnesses }}
+      prefix: ${{ steps.parse.outputs.prefix }}
+    steps:
+      - name: Parse tag
+        id: parse
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "Tag: $TAG"
+
+          # Extract prefix and version
+          if [[ "$TAG" =~ ^(kit|claudecode|copilot|codex)-v(.+)$ ]]; then
+            PREFIX="${BASH_REMATCH[1]}"
+            VERSION="${BASH_REMATCH[2]}"
+          else
+            echo "Error: tag '$TAG' does not match expected pattern" >&2
+            exit 1
+          fi
+
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Map prefix to harness list
+          case "$PREFIX" in
+            kit)
+              echo 'harnesses=["claude-code","codex","github-copilot"]' >> "$GITHUB_OUTPUT"
+              ;;
+            claudecode)
+              echo 'harnesses=["claude-code"]' >> "$GITHUB_OUTPUT"
+              ;;
+            copilot)
+              echo 'harnesses=["github-copilot"]' >> "$GITHUB_OUTPUT"
+              ;;
+            codex)
+              echo 'harnesses=["codex"]' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Error: unhandled prefix '$PREFIX'" >&2
+              exit 1
+              ;;
+          esac
+
+  # -------------------------------------------------------------------
+  # Job 2: Generate and validate the kit structure from .claude/ sources
+  # -------------------------------------------------------------------
+  generate-kit:
+    runs-on: ubuntu-latest
+    needs: parse-tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate kit structure
+        run: node scripts/generate-kit-structure.mjs "${{ needs.parse-tag.outputs.version }}" "${{ runner.temp }}/kit-repo"
+
+      - name: Validate kit
+        run: npx @hashicorp/kits validate "${{ runner.temp }}/kit-repo"
+
+      - name: Upload kit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kit-repo
+          path: ${{ runner.temp }}/kit-repo
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  # Job 3: Build per-harness tarballs (matrix)
+  # -------------------------------------------------------------------
+  build-harness:
+    runs-on: ubuntu-latest
+    needs: [parse-tag, generate-kit]
+    strategy:
+      matrix:
+        harness: ${{ fromJson(needs.parse-tag.outputs.harnesses) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download kit artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kit-repo
+          path: ${{ runner.temp }}/kit-repo
+
+      - name: Fake harness detection
+        run: bash scripts/fake-harness-detection.sh "${{ matrix.harness }}"
+
+      - name: Install kit into project
+        run: |
+          PROJECT_DIR="${{ runner.temp }}/install-${{ matrix.harness }}"
+          mkdir -p "$PROJECT_DIR"
+          cd "$PROJECT_DIR"
+          npx @hashicorp/kits install \
+            "${{ runner.temp }}/kit-repo" \
+            --project --agent "${{ matrix.harness }}" --yes --overwrite
+
+      - name: Create tarball
+        run: |
+          PROJECT_DIR="${{ runner.temp }}/install-${{ matrix.harness }}"
+
+          # Determine harness-specific tarball prefix
+          case "${{ matrix.harness }}" in
+            claude-code)    PREFIX="claudecode" ;;
+            codex)          PREFIX="codex" ;;
+            github-copilot) PREFIX="copilot" ;;
+            *)
+              echo "Error: unknown harness '${{ matrix.harness }}'" >&2
+              exit 1
+              ;;
+          esac
+
+          TARBALL="${PREFIX}-v${{ needs.parse-tag.outputs.version }}.tar.gz"
+          cd "$PROJECT_DIR"
+          tar czf "${{ runner.temp }}/${TARBALL}" .
+          echo "TARBALL_PATH=${{ runner.temp }}/${TARBALL}" >> "$GITHUB_ENV"
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.harness }}
+          path: ${{ env.TARBALL_PATH }}
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  # Job 4: Create GitHub Release with all tarballs
+  # -------------------------------------------------------------------
+  release:
+    runs-on: ubuntu-latest
+    needs: [parse-tag, build-harness]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all tarball artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tarball-*
+          path: ${{ runner.temp }}/tarballs
+          merge-multiple: true
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag for changelog
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^(kit|claudecode|copilot|codex)-v' | head -2 | tail -1) || true
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "${GITHUB_REF_NAME}" ]; then
+            CHANGELOG="Initial release"
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${GITHUB_REF_NAME}" -- . ':!tools/')
+            if [ -z "$CHANGELOG" ]; then
+              CHANGELOG="No notable changes"
+            fi
+          fi
+
+          # Write to file (multi-line safe)
+          {
+            echo "## Changes"
+            echo ""
+            echo "$CHANGELOG"
+            echo ""
+            echo "## Harnesses"
+            echo ""
+            for f in "${{ runner.temp }}"/tarballs/*.tar.gz; do
+              [ -f "$f" ] && echo "- \`$(basename "$f")\`"
+            done
+          } > "${{ runner.temp }}/release-notes.md"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "${{ needs.parse-tag.outputs.prefix }} ${{ needs.parse-tag.outputs.version }}"
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: ${{ runner.temp }}/tarballs/*.tar.gz
+          draft: false
+          prerelease: false

@@ -1,0 +1,8 @@
+# Python dependencies for GitHub Actions workflows
+# Pin versions for reproducibility and security
+
+# HTTP client for API calls
+requests==2.31.0
+
+# Semantic version parsing and comparison
+packaging==24.0

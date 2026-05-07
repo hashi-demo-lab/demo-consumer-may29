@@ -1,0 +1,21 @@
+{
+  "skill_name": "provider-test-speed",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Analyze my provider's acceptance tests and produce a parallel execution script. The test output from the last sequential run is at .claude/skills/provider-test-speed-workspace/test-output.log. Generate the script but do NOT execute it. Compare grouping strategy and estimated speedup vs the sequential baseline.",
+      "expected_output": "A runnable parallel execution script with 4-5 groups, pre-compiled binary, exponential backoff retry, and a comparison table showing estimated speedup.",
+      "files": [".claude/skills/provider-test-speed-workspace/test-output.log"],
+      "assertions": [
+        {"text": "produces_script", "description": "Creates an executable bash script for parallel test execution"},
+        {"text": "pre_compiles_binary", "description": "Script pre-compiles test binary with 'go test -c' before launching groups"},
+        {"text": "group_count_4_or_5", "description": "Uses 4 or 5 parallel groups (not 3 or fewer, not 6+)"},
+        {"text": "separates_heavy_tests", "description": "Tests triggering long-running backend operations are separated from CRUD-only and data source tests"},
+        {"text": "has_exponential_backoff", "description": "Includes retry with exponential backoff for timeout-related failures"},
+        {"text": "covers_all_tests", "description": "Test run patterns cover all discovered acceptance tests without gaps"},
+        {"text": "uses_test_binary_flags", "description": "Uses -test.run, -test.count=1, -test.timeout, -test.v flags on pre-compiled binary"},
+        {"text": "reports_comparison", "description": "Outputs a comparison table or estimate of sequential vs parallel wall times"}
+      ]
+    }
+  ]
+}

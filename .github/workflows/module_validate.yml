@@ -1,0 +1,136 @@
+name: 'Module Validate'
+
+run-name: 'Validate: ${{ github.event.pull_request.title || github.ref_name }}'
+
+on:
+  pull_request:
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '**.tftest.hcl'
+      - '.github/workflows/module_validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  validate-module:
+    name: 'Validate Module'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check Required Semantic Version Label
+      uses: mheap/github-action-required-labels@v5
+      with:
+        mode: exactly
+        count: 1
+        labels: "semver:patch, semver:minor, semver:major"
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: latest
+
+    - name: Terraform Format Check
+      id: fmt
+      run: |
+        if ! terraform fmt -check -recursive; then
+          echo "Terraform files are not formatted correctly"
+          echo "Run 'terraform fmt -recursive' locally to fix"
+          exit 1
+        fi
+
+    - name: Terraform Init
+      id: init
+      run: terraform init -backend=false
+
+    - name: Terraform Validate
+      id: validate
+      run: terraform validate
+
+    - name: Setup TFLint
+      uses: terraform-linters/setup-tflint@v4
+      with:
+        tflint_version: latest
+
+    - name: TFLint
+      id: tflint
+      run: |
+        tflint --init
+        tflint --format compact
+      continue-on-error: true
+
+    - name: Run Trivy Security Scanner
+      uses: aquasecurity/trivy-action@v0.35.0
+      with:
+        scan-type: 'config'
+        scan-ref: '.'
+        exit-code: '0'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Run Unit Tests
+      id: test
+      run: |
+        terraform test \
+          -filter=tests/unit_basic.tftest.hcl \
+          -filter=tests/unit_complete.tftest.hcl \
+          -filter=tests/unit_edge_cases.tftest.hcl \
+          -filter=tests/unit_validation.tftest.hcl
+
+    - name: Update Terraform Docs
+      uses: terraform-docs/gh-actions@v1.3.0
+      with:
+        working-dir: .
+        output-file: README.md
+        output-method: inject
+        git-push: "true"
+
+    - name: Validation Summary
+      if: always()
+      run: |
+        echo "## Validation Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Format | ${{ steps.fmt.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Init | ${{ steps.init.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Validate | ${{ steps.validate.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| TFLint | ${{ steps.tflint.outcome == 'success' && '✅ Passed' || '⚠️ Warnings' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ${{ steps.test.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+
+  validate-examples:
+    name: 'Validate Examples (${{ matrix.example }})'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        example:
+          - basic
+          - complete
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: latest
+
+    - name: Terraform Init
+      working-directory: examples/${{ matrix.example }}
+      run: terraform init -backend=false
+
+    - name: Terraform Validate
+      working-directory: examples/${{ matrix.example }}
+      run: terraform validate

@@ -1,0 +1,247 @@
+name: "Terraform Module Request"
+description: "Request development of a new Terraform module using SDD workflow"
+title: "[MODULE REQUEST] "
+labels: ["module-request", "sdd"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Terraform Module Request
+
+        Use this template to request a new Terraform module built with the SDD workflow.
+        Fill in as much detail as possible — required fields are marked. Optional fields help
+        the agent produce a more accurate specification on the first pass.
+
+  # ============================================================================
+  # Module Identity
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Module Identity
+
+  - type: input
+    id: module_name
+    attributes:
+      label: "Module Name"
+      description: "Name following the terraform-<PROVIDER>-<NAME> convention"
+      placeholder: "e.g., terraform-aws-vpc, terraform-azurerm-vnet, terraform-google-gke"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: "Provider"
+      description: "Primary cloud provider for this module"
+      options:
+        - aws
+        - azurerm
+        - google
+    validations:
+      required: true
+
+  - type: input
+    id: provider_version_constraint
+    attributes:
+      label: "Provider Version Constraint"
+      description: "Version constraint for the provider (leave blank to use latest compatible)"
+      placeholder: "e.g., ~> 5.0, >= 4.50"
+
+  - type: input
+    id: terraform_version_constraint
+    attributes:
+      label: "Terraform Version Constraint"
+      description: "Minimum Terraform version this module must support"
+      placeholder: ">= 1.5"
+      value: ">= 1.5"
+
+  # ============================================================================
+  # Module Purpose
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Module Purpose
+
+  - type: textarea
+    id: module_purpose
+    attributes:
+      label: "Module Purpose / Description"
+      description: "What infrastructure does this module manage? What problem does it solve for consumers?"
+      placeholder: |
+        Example:
+        - Creates a production-ready VPC with public and private subnets
+        - Supports configurable number of AZs and subnet CIDR blocks
+        - Includes optional NAT Gateway for private subnet internet access
+        - Enables consumers to deploy compliant networking in minutes
+    validations:
+      required: true
+
+  # ============================================================================
+  # Resources Needed
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Resources Needed
+
+  - type: textarea
+    id: resources_needed
+    attributes:
+      label: "Resources Needed"
+      description: "List the AWS/cloud resources this module should create and manage"
+      placeholder: |
+        Example:
+        - aws_vpc (primary VPC)
+        - aws_subnet (public and private, per AZ)
+        - aws_internet_gateway
+        - aws_nat_gateway (optional, configurable)
+        - aws_eip (for NAT Gateway)
+        - aws_route_table (public and private)
+        - aws_route_table_association
+        - aws_vpc_flow_log (optional, enabled by default)
+    validations:
+      required: true
+
+  # ============================================================================
+  # Input Variables
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Input Variables
+
+  - type: textarea
+    id: input_variables
+    attributes:
+      label: "Input Variables"
+      description: "Known input variables with types. The agent will expand and refine these during planning."
+      placeholder: |
+        Example:
+        - name: string, required — Name prefix for all resources
+        - vpc_cidr: string, required — CIDR block for the VPC
+        - availability_zones: list(string), required — List of AZs to use
+        - enable_nat_gateway: bool, optional, default: false — Create NAT Gateway
+        - tags: map(string), optional, default: {} — Additional resource tags
+
+  # ============================================================================
+  # Output Values
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Output Values
+
+  - type: textarea
+    id: output_values
+    attributes:
+      label: "Output Values"
+      description: "Desired outputs that consumers of this module will reference"
+      placeholder: |
+        Example:
+        - vpc_id: string — ID of the created VPC
+        - public_subnet_ids: list(string) — List of public subnet IDs
+        - private_subnet_ids: list(string) — List of private subnet IDs
+        - nat_gateway_ids: list(string) — NAT Gateway IDs (empty if disabled)
+
+  # ============================================================================
+  # Security Requirements
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Security Requirements
+
+  - type: textarea
+    id: security_requirements
+    attributes:
+      label: "Security Requirements"
+      description: "Encryption, access control, compliance standards, and other security considerations"
+      placeholder: |
+        Example:
+        - Encryption at rest using customer-managed KMS keys
+        - VPC Flow Logs enabled by default
+        - Default security group denies all inbound traffic
+        - No public IPs assigned unless explicitly enabled
+        - Must meet CIS AWS Foundations Benchmark Level 2
+
+  # ============================================================================
+  # Integration Points
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Integration Points
+
+  - type: textarea
+    id: integration_points
+    attributes:
+      label: "Integration Points"
+      description: "Other modules, services, or dependencies this module must integrate with"
+      placeholder: |
+        Example:
+        - Consumes outputs from terraform-aws-vpc module
+        - Feeds subnet IDs into terraform-aws-eks module
+        - Requires existing Route53 hosted zone
+        - Integrates with shared KMS key from security-baseline module
+
+  # ============================================================================
+  # Environment / Constraints
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Environment / Constraints
+
+  - type: textarea
+    id: environment_constraints
+    attributes:
+      label: "Environment / Constraints"
+      description: "Regions, naming conventions, cost constraints, or other operational requirements"
+      placeholder: |
+        Example:
+        - Must deploy to us-east-1 and eu-west-1
+        - Resource naming: {project}-{env}-{resource} convention
+        - NAT Gateway cost must be controllable (single vs. per-AZ option)
+        - Must not use external provisioners (local-exec, remote-exec)
+        - Maximum 20 resources for maintainability
+
+  # ============================================================================
+  # Additional Context
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Additional Context
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: "Additional Context"
+      description: "Any other information, migration notes, or special requirements"
+      placeholder: |
+        Example:
+        - Replaces an existing community module we have outgrown
+        - Must support both single-AZ and multi-AZ deployments
+        - Team needs examples/ for onboarding new engineers
+        - Module will be published to private registry under acme-corp org

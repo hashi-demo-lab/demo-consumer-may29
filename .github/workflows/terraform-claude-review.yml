@@ -1,0 +1,191 @@
+name: "Claude Review (@claude)"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+env:
+  # TFE_TOKEN exists in both Actions and Dependabot secret stores.
+  # GitHub resolves the correct store based on the trigger context.
+  TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
+  # tfc-workflows-github actions read these env vars automatically
+  TF_API_TOKEN: ${{ secrets.TFE_TOKEN }}
+  TF_CLOUD_ORGANIZATION: "hashi-demos-apj"
+  TF_WORKSPACE: "terraform-agentic-workflows-demo01"
+
+jobs:
+  # ── Gate: fast filter to prevent bot comments from entering the concurrency group ──
+  # GitHub evaluates concurrency BEFORE job-level `if`, so a bot comment
+  # (e.g. Claude's "working…" progress update) would cancel an in-progress
+  # review via cancel-in-progress even though the job would be skipped.
+  # This gate job has NO concurrency group, so bot comments exit immediately
+  # without affecting running reviews.
+  gate:
+    name: "Filter"
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      github.event.comment.user.login != 'claude[bot]' &&
+      github.event.comment.user.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Comment from ${{ github.event.comment.user.login }} passed gate"
+
+  review:
+    name: "Claude Review"
+    needs: gate
+    concurrency:
+      group: claude-review-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR branch
+        id: pr
+        run: |
+          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '{ref: .head.ref, sha: .head.sha}')
+          echo "ref=$(echo "$PR_DATA" | jq -r '.ref')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(echo "$PR_DATA" | jq -r '.sha')" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          cli_config_credentials_hostname: app.terraform.io
+          cli_config_credentials_token: ${{ env.TFE_TOKEN }}
+
+      # Full backend init: Claude's fix loop needs terraform plan (via CLI)
+      # to surface all errors. The workflow's initial plan uses tfci (speculative).
+      - name: Terraform Init
+        run: terraform init -input=false
+        continue-on-error: true
+
+      # Run pre-commit to surface ALL issues in a single pass (validate,
+      # fmt, tflint, docs, trivy, etc.) so Claude sees the full picture
+      # rather than discovering errors one-at-a-time across pipeline reruns.
+      - name: Run pre-commit checks
+        uses: pre-commit/action@v3.0.1
+        continue-on-error: true
+
+      - name: Capture pre-commit results
+        if: always()
+        run: |
+          pre-commit run --all-files 2>&1 | tee .pre-commit-results.txt || true
+
+      # ── Speculative plan via TFC API (no Apply button, no workspace lock) ──
+      - name: Upload Configuration
+        if: always()
+        id: upload
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        continue-on-error: true
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: "."
+          speculative: true
+
+      - name: Create Plan Run
+        if: steps.upload.outputs.status == 'Success'
+        id: run
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        continue-on-error: true
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          plan_only: true
+          message: "Speculative plan for Claude review (PR #${{ github.event.issue.number }})"
+
+      - name: Get Plan Output
+        if: steps.run.outputs.status == 'Success'
+        id: plan-output
+        uses: hashicorp/tfc-workflows-github/actions/plan-output@v1.3.2
+        continue-on-error: true
+        with:
+          plan: ${{ steps.run.outputs.plan_id }}
+
+      - name: Write plan results
+        if: always()
+        run: |
+          RUN_STATUS="${{ steps.run.outputs.status }}"
+          PLAN_STATUS="${{ steps.run.outputs.plan_status }}"
+          RUN_LINK="${{ steps.run.outputs.run_link }}"
+          ADD="${{ steps.plan-output.outputs.add }}"
+          CHANGE="${{ steps.plan-output.outputs.change }}"
+          DESTROY="${{ steps.plan-output.outputs.destroy }}"
+
+          {
+            echo "# Terraform Plan Results (Speculative)"
+            echo ""
+            echo "Run Status: ${RUN_STATUS:-not_started}"
+            echo "Plan Status: ${PLAN_STATUS:-unknown}"
+            echo ""
+
+            if [[ "$RUN_STATUS" == "Success" ]]; then
+              echo "## Resource Changes"
+              echo "  Add:     ${ADD:-0}"
+              echo "  Change:  ${CHANGE:-0}"
+              echo "  Destroy: ${DESTROY:-0}"
+            elif [[ -n "$RUN_STATUS" ]]; then
+              echo "## Plan Failed"
+              echo "The speculative plan failed with status: ${PLAN_STATUS}"
+              echo "This typically means breaking changes in the module version bump."
+            else
+              echo "## Plan Not Run"
+              echo "The configuration upload or plan creation failed."
+            fi
+
+            if [[ -n "$RUN_LINK" ]]; then
+              echo ""
+              echo "## Full Plan Details"
+              echo "View the complete plan output in HCP Terraform:"
+              echo "${RUN_LINK}"
+            fi
+
+            echo ""
+            echo "---"
+            echo "Note: This was a speculative plan (plan-only, no apply button)."
+            echo "Use terraform validate locally to verify fixes."
+            echo "Push fixes to re-trigger the uplift pipeline for a fresh plan."
+          } > .plan-results.txt
+
+          cat .plan-results.txt
+
+      # .mcp.json uses Docker (local dev); .mcp-ci.json uses npx (CI-friendly).
+      # The action hardcodes enableAllProjectMcpServers=true, so it loads .mcp.json.
+      - name: Use CI MCP config
+        run: cp .mcp-ci.json .mcp.json
+
+      # track_progress forces tag mode (comment tracking + PR context).
+      # Without it, 'prompt' on issue_comment events triggers agent mode
+      # which runs silently without posting results to the PR.
+      # The prompt is appended as <custom_instructions> to the full PR context.
+      # Tag mode sets allowedTools which auto-enables sandbox in Claude Code.
+      # Sandbox conflicts with settings loaded from file paths. Passing
+      # --settings as inline JSON satisfies the sandbox check.
+      - name: Run Claude
+        uses: anthropics/claude-code-action@5d0cc745cd0cce4c0e9e0b3511de26c3bc285eb5 # latest main (2026-03-12)
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          trigger_phrase: "@claude"
+          track_progress: true
+          show_full_output: true
+          settings: "{}"
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 45
+            --allowedTools Bash(terraform:*),Bash(git:*)
+          prompt: |
+            Read .pre-commit-results.txt and .plan-results.txt for initial context, then
+            read and follow .claude/agents/module-upgrade-remediation.md as your playbook.

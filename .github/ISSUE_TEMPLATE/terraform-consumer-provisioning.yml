@@ -1,0 +1,300 @@
+name: "Terraform Consumer Provisioning"
+description: "Request provisioning of infrastructure by composing private registry modules"
+title: "[CONSUMER] "
+labels: ["consumer-provisioning", "sdd"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Terraform Consumer Provisioning
+
+        Use this template to request infrastructure provisioning that composes existing
+        private registry modules. Fill in as much detail as possible — required fields
+        are marked. Optional fields help the agent produce a more accurate design on
+        the first pass.
+
+  # ============================================================================
+  # Application Identity
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Application Identity
+
+  - type: input
+    id: application_name
+    attributes:
+      label: "Application / Service Name"
+      description: "Name of the application or service being deployed"
+      placeholder: "e.g., order-service, data-pipeline, web-frontend"
+    validations:
+      required: true
+
+  - type: input
+    id: project_name
+    attributes:
+      label: "Project Name"
+      description: "Project identifier used for naming and tagging"
+      placeholder: "e.g., acme-ecommerce, analytics-platform"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: "Cloud Provider"
+      description: "Primary cloud provider for this deployment"
+      options:
+        - aws
+        - azurerm
+        - google
+    validations:
+      required: true
+
+  # ============================================================================
+  # Modules Required
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Modules Required
+
+  - type: textarea
+    id: modules_required
+    attributes:
+      label: "Private Registry Modules"
+      description: "Which private registry modules should be composed for this deployment?"
+      placeholder: |
+        Example:
+        - terraform-aws-vpc (networking layer)
+        - terraform-aws-eks (Kubernetes cluster)
+        - terraform-aws-rds (PostgreSQL database)
+        - terraform-aws-s3 (application storage)
+        - terraform-aws-cloudwatch (monitoring)
+    validations:
+      required: true
+
+  # ============================================================================
+  # Environment
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Environment
+
+  - type: input
+    id: environment
+    attributes:
+      label: "Target Environment"
+      description: "Environment name (used for workspace naming and tagging)"
+      placeholder: "e.g., dev, staging, production"
+    validations:
+      required: true
+
+  - type: input
+    id: aws_region
+    attributes:
+      label: "AWS Region"
+      description: "Primary deployment region"
+      placeholder: "e.g., us-east-1, eu-west-1"
+    validations:
+      required: true
+
+  - type: input
+    id: aws_account
+    attributes:
+      label: "AWS Account ID"
+      description: "Target AWS account for deployment"
+      placeholder: "e.g., 123456789012"
+
+  - type: input
+    id: hcp_workspace
+    attributes:
+      label: "HCP Terraform Workspace"
+      description: "Target workspace name (will be created if it doesn't exist)"
+      placeholder: "e.g., acme-ecommerce-dev"
+
+  # ============================================================================
+  # Networking
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Networking
+
+  - type: textarea
+    id: networking
+    attributes:
+      label: "Networking Requirements"
+      description: "VPC, subnet, and connectivity requirements"
+      placeholder: |
+        Example:
+        - VPC with /16 CIDR block
+        - 3 AZs with public and private subnets
+        - NAT Gateway for private subnet internet access
+        - VPC peering to shared-services VPC
+        - No public IPs on compute resources
+
+  # ============================================================================
+  # Compute / Storage / Database
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Compute / Storage / Database
+
+  - type: textarea
+    id: compute_storage
+    attributes:
+      label: "Application Tier Requirements"
+      description: "Compute, storage, and database sizing and configuration"
+      placeholder: |
+        Example:
+        - EKS cluster: 3 nodes, t3.large, managed node group
+        - RDS PostgreSQL: db.r6g.large, Multi-AZ, 100GB storage
+        - S3 bucket for application assets, versioning enabled
+        - ElastiCache Redis for session management
+
+  # ============================================================================
+  # Monitoring & Observability
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Monitoring & Observability
+
+  - type: textarea
+    id: monitoring
+    attributes:
+      label: "Monitoring Requirements"
+      description: "CloudWatch, alarms, dashboards, and observability needs"
+      placeholder: |
+        Example:
+        - CloudWatch alarms for CPU, memory, disk
+        - Application dashboard with key metrics
+        - SNS topic for alarm notifications
+        - VPC Flow Logs enabled
+        - CloudTrail for audit logging
+
+  # ============================================================================
+  # Backup & DR
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Backup & DR
+
+  - type: textarea
+    id: backup_dr
+    attributes:
+      label: "Backup & Disaster Recovery"
+      description: "Recovery objectives and backup strategy"
+      placeholder: |
+        Example:
+        - RTO: 4 hours, RPO: 1 hour
+        - Automated daily RDS snapshots, 30-day retention
+        - S3 cross-region replication for critical data
+        - EKS cluster in multiple AZs
+
+  # ============================================================================
+  # Cost Constraints
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Cost Constraints
+
+  - type: textarea
+    id: cost_constraints
+    attributes:
+      label: "Cost Constraints"
+      description: "Budget limits, instance sizing preferences, cost optimization requirements"
+      placeholder: |
+        Example:
+        - Monthly budget: $2,000
+        - Use spot instances for non-critical workloads
+        - Single NAT Gateway (not per-AZ) for dev/staging
+        - Reserved instances for production databases
+
+  # ============================================================================
+  # Tags
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Tags
+
+  - type: textarea
+    id: tags
+    attributes:
+      label: "Additional Tags"
+      description: "Application-specific tags beyond the standard set (ManagedBy, Environment, Project, Owner)"
+      placeholder: |
+        Example:
+        - CostCenter: CC-12345
+        - DataClassification: confidential
+        - Compliance: pci-dss
+        - Team: platform-engineering
+
+  # ============================================================================
+  # Integration Points
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Integration Points
+
+  - type: textarea
+    id: integration_points
+    attributes:
+      label: "Integration Points"
+      description: "External dependencies, other workspaces, cross-account access"
+      placeholder: |
+        Example:
+        - Shared VPC peering from networking workspace
+        - DNS records in Route53 hosted zone (managed by dns-workspace)
+        - Secrets from AWS Secrets Manager (managed by security-workspace)
+        - Container images from shared ECR in tools account
+
+  # ============================================================================
+  # Additional Context
+  # ============================================================================
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Additional Context
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: "Additional Context"
+      description: "Any other information, migration notes, or special requirements"
+      placeholder: |
+        Example:
+        - Migrating from manual CloudFormation deployment
+        - Must support blue/green deployments
+        - Compliance requirement: all data encrypted with CMK
+        - Team is new to Terraform — needs clear documentation

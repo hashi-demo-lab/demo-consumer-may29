@@ -1,0 +1,127 @@
+name: 'Module Release'
+
+run-name: 'Release: ${{ github.event.pull_request.title }}'
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish-module:
+    name: 'Publish Module to Registry'
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get PR Labels
+      id: pr-labels
+      uses: snnaplab/get-labels-action@v1
+
+    - name: Determine Release Type
+      id: release-type
+      run: |
+        LABELS='${{ env.LABELS }}'
+
+        if echo "$LABELS" | grep -q '"semver:major"'; then
+          echo "RELEASE_TYPE=major" >> $GITHUB_ENV
+          echo "release=major" >> $GITHUB_OUTPUT
+          echo "Detected MAJOR release (breaking changes)"
+        elif echo "$LABELS" | grep -q '"semver:minor"'; then
+          echo "RELEASE_TYPE=minor" >> $GITHUB_ENV
+          echo "release=minor" >> $GITHUB_OUTPUT
+          echo "Detected MINOR release (new features)"
+        elif echo "$LABELS" | grep -q '"semver:patch"'; then
+          echo "RELEASE_TYPE=patch" >> $GITHUB_ENV
+          echo "release=patch" >> $GITHUB_OUTPUT
+          echo "Detected PATCH release (bug fixes)"
+        else
+          echo "ERROR: No valid semver label found!"
+          echo "Please add one of: semver:major, semver:minor, semver:patch"
+          exit 1
+        fi
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Python Dependencies
+      run: pip install -r ./.github/workflows/requirements.txt
+
+    - name: Calculate New Version
+      id: new-version
+      run: |
+        echo "Calculating new version..."
+        NEW_VERSION=$(python ./.github/workflows/get_module_version.py)
+
+        if [ -z "$NEW_VERSION" ]; then
+          echo "ERROR: Failed to calculate new version"
+          exit 1
+        fi
+
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "New version will be: $NEW_VERSION"
+      env:
+        TFE_HOSTNAME: 'app.terraform.io'
+        TFE_ORG: ${{ vars.TFE_ORG }}
+        TFE_MODULE: ${{ vars.TFE_MODULE }}
+        TFE_PROVIDER: ${{ vars.TFE_PROVIDER }}
+        TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
+        RELEASE_TYPE: ${{ env.RELEASE_TYPE }}
+
+    - name: Publish Module Version
+      id: publish
+      run: |
+        echo "Publishing module version ${{ steps.new-version.outputs.new_version }}..."
+        python ./.github/workflows/publish_module_version.py
+        echo "Module published successfully!"
+      env:
+        TFE_HOSTNAME: 'app.terraform.io'
+        TFE_ORG: ${{ vars.TFE_ORG }}
+        TFE_MODULE: ${{ vars.TFE_MODULE }}
+        TFE_PROVIDER: ${{ vars.TFE_PROVIDER }}
+        TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
+        COMMIT_SHA: ${{ github.sha }}
+        NEW_VERSION: ${{ steps.new-version.outputs.new_version }}
+
+    - name: Create Git Tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v${{ steps.new-version.outputs.new_version }}" -m "Release v${{ steps.new-version.outputs.new_version }}"
+        git push origin "v${{ steps.new-version.outputs.new_version }}"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.new-version.outputs.new_version }}
+        name: v${{ steps.new-version.outputs.new_version }}
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Release Summary
+      if: always()
+      run: |
+        echo "## Module Release" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Module**: ${{ vars.TFE_ORG }}/${{ vars.TFE_MODULE }}/${{ vars.TFE_PROVIDER }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Version**: ${{ steps.new-version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Release Type**: ${{ steps.release-type.outputs.release }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "View in Registry: https://app.terraform.io/app/${{ vars.TFE_ORG }}/registry/modules/private/${{ vars.TFE_ORG }}/${{ vars.TFE_MODULE }}/${{ vars.TFE_PROVIDER }}/${{ steps.new-version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY

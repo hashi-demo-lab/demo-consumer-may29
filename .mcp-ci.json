@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "terraform": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/terraform-mcp-server@latest", "--toolsets=all"],
+      "env": {
+        "TFE_TOKEN": "${TFE_TOKEN}"
+      }
+    }
+  }
+}

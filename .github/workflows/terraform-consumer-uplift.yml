@@ -1,0 +1,759 @@
+name: "Terraform Consumer Module Uplift"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.tf"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: consumer-uplift-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  # TFE_TOKEN exists in BOTH secret stores:
+  #   - Actions secret:    full workspace access (normal runs)
+  #   - Dependabot secret: full workspace access (Dependabot-triggered runs)
+  # GitHub resolves the correct store automatically based on the trigger context.
+  # TFE_TOKEN_DEPENDABOT (Dependabot secret, PMR read-only) is used only by dependabot.yml.
+  TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
+
+jobs:
+  # ─────────────────────────────────────────────────
+  # Job 1: CLASSIFY — Parse git diff, detect semver type
+  # ─────────────────────────────────────────────────
+  classify:
+    name: "Classify Version Bump"
+    if: >-
+      github.event_name == 'pull_request' &&
+      (startsWith(github.head_ref, 'dependabot/terraform/') ||
+       startsWith(github.head_ref, 'module-update/'))
+    runs-on: ubuntu-latest
+    outputs:
+      version_type: ${{ steps.classify.outputs.version_type }}
+      modules_changed: ${{ steps.classify.outputs.modules_changed }}
+      module_count: ${{ steps.classify.outputs.module_count }}
+      is_dependabot: ${{ steps.classify.outputs.is_dependabot }}
+      should_continue: ${{ steps.classify.outputs.should_continue }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify version bump
+        id: classify
+        run: |
+          chmod +x .foundations/scripts/bash/classify-version-bump.sh
+          RESULT=$(bash .foundations/scripts/bash/classify-version-bump.sh \
+            --base "origin/${{ github.base_ref }}" \
+            --head "HEAD") || {
+            EXIT_CODE=$?
+            if [[ $EXIT_CODE -eq 2 ]]; then
+              echo "No module version changes detected"
+              echo "should_continue=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Classification failed with exit code $EXIT_CODE"
+            exit 1
+          }
+
+          echo "version_type=$(echo "$RESULT" | jq -r '.version_type')" >> "$GITHUB_OUTPUT"
+          echo "modules_changed=$(echo "$RESULT" | jq -c '.modules_changed')" >> "$GITHUB_OUTPUT"
+          echo "module_count=$(echo "$RESULT" | jq -r '.module_count')" >> "$GITHUB_OUTPUT"
+          # Override is_dependabot from workflow context — git detached HEAD
+          # in CI means the classify script can't detect branch name.
+          IS_DEPENDABOT=$([[ "${{ github.head_ref }}" == dependabot/* ]] && echo true || echo false)
+          echo "is_dependabot=${IS_DEPENDABOT}" >> "$GITHUB_OUTPUT"
+          echo "should_continue=true" >> "$GITHUB_OUTPUT"
+
+          # ── Step summary ──
+          VERSION_TYPE=$(echo "$RESULT" | jq -r '.version_type')
+          MODULE_COUNT=$(echo "$RESULT" | jq -r '.module_count')
+
+          {
+            echo "## 1/4 — Classify Version Bump"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version Type | \`${VERSION_TYPE}\` |"
+            echo "| Modules Changed | ${MODULE_COUNT} |"
+            echo "| Source | $(if [[ "$IS_DEPENDABOT" == "true" ]]; then echo "Dependabot"; else echo "Fallback Scanner / Manual"; fi) |"
+            echo ""
+            echo "### Modules"
+            echo ""
+            echo "| Module | Source | Old Version | New Version | Bump |"
+            echo "|--------|--------|-------------|-------------|------|"
+            echo "$RESULT" | jq -r '.modules_changed[] | "| `\(.module)` | \(.source) | `\(.old_version)` | `\(.new_version)` | `\(.bump_type)` |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────
+  # Job 2: VALIDATE — Deterministic Terraform checks
+  # ─────────────────────────────────────────────────
+  validate:
+    name: "Validate Terraform"
+    needs: classify
+    if: needs.classify.outputs.should_continue == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+      validate_exitcode: ${{ steps.validate.outputs.exitcode }}
+      plan_summary: ${{ steps.plan-summary.outputs.summary }}
+      plan_resources: ${{ steps.plan-summary.outputs.plan_resources }}
+      run_url: ${{ steps.plan.outputs.run_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          cli_config_credentials_hostname: app.terraform.io
+          cli_config_credentials_token: ${{ env.TFE_TOKEN }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          set +e
+          terraform validate 2>&1 | tee validate_output.txt
+          VALIDATE_EXIT=$?
+          set -e
+
+          echo "exitcode=${VALIDATE_EXIT}" >> "$GITHUB_OUTPUT"
+
+          if [[ $VALIDATE_EXIT -ne 0 ]]; then
+            {
+              echo "## 2/4 — Validate Terraform"
+              echo ""
+              echo "> **Result**: Validation failed — breaking changes detected."
+              echo ""
+              echo "<details><summary>Validation errors</summary>"
+              echo ""
+              echo '```hcl'
+              cat validate_output.txt
+              echo '```'
+              echo ""
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          exit 0
+
+      - name: TFLint
+        if: steps.validate.outputs.exitcode == '0'
+        uses: terraform-linters/setup-tflint@v4
+      - run: |
+          tflint --init
+          tflint --format=compact
+        if: steps.validate.outputs.exitcode == '0'
+
+      - name: Terraform Plan
+        if: steps.validate.outputs.exitcode == '0'
+        id: plan
+        run: |
+          set +e
+          set -o pipefail
+          terraform plan -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan_output.txt
+          PLAN_EXIT=${PIPESTATUS[0]}
+          set +o pipefail
+          set -e
+
+          echo "exitcode=${PLAN_EXIT}" >> "$GITHUB_OUTPUT"
+
+          # Extract TFC run URL (CLI-driven workspaces print this during remote plan).
+          # Strip ANSI escape codes (\x1B[0m etc.) that Terraform includes in colored output.
+          RUN_URL=$(grep -oP 'https://app\.terraform\.io/\S+' plan_output.txt | head -1 | sed 's/\x1B\[[0-9;]*m//g' || true)
+          echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+
+          case $PLAN_EXIT in
+            0)
+              {
+                echo "## 2/4 — Validate Terraform"
+                echo ""
+                echo "> **Result**: No changes — workspace already at target version."
+                echo ""
+                echo "The PR will be auto-closed."
+                if [[ -n "$RUN_URL" ]]; then
+                  echo ""
+                  echo "> :link: [View TFC Run](${RUN_URL})"
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              {
+                echo "## 2/4 — Validate Terraform"
+                echo ""
+                echo "> **Result**: Plan error — likely breaking changes."
+                echo ""
+                echo "<details><summary>Error output (last 30 lines)</summary>"
+                echo ""
+                echo '```hcl'
+                tail -30 plan_output.txt
+                echo '```'
+                echo ""
+                echo "</details>"
+                if [[ -n "$RUN_URL" ]]; then
+                  echo ""
+                  echo "> :link: [View TFC Run](${RUN_URL})"
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2)
+              terraform show -no-color tfplan > plan_readable.txt 2>&1 || true
+
+              # Generate resource table (gist-style: Action | Resource)
+              {
+                awk '/will be/ || /must be/ {print "| " $5 " | " $2 " |"; next}' plan_readable.txt \
+                  | sed \
+                    -e 's/created/:white_check_mark: add/' \
+                    -e 's/destroyed/:bangbang: destroy/' \
+                    -e 's/replaced/:warning: replace/' \
+                    -e 's/updated/:warning: change/' \
+                    -e 's/read/:mag: read/'
+              } > plan_resources_table.txt
+
+              # Plan summary line (e.g., "Plan: 4 to add, 0 to change, 0 to destroy.")
+              PLAN_LINE=$(awk '/Plan:/ { print $0 }' plan_readable.txt || echo "")
+
+              {
+                echo "## 2/4 — Validate Terraform"
+                echo ""
+                echo "> **Result**: Changes detected — proceeding to risk assessment."
+                echo ""
+                echo "| Check | Status |"
+                echo "|-------|--------|"
+                echo "| \`terraform fmt\` | Passed |"
+                echo "| \`terraform validate\` | Passed |"
+                echo "| \`tflint\` | Passed |"
+                echo "| \`terraform plan\` | Exit 2 (changes) |"
+                echo ""
+
+                if [[ -s plan_resources_table.txt ]]; then
+                  echo "### Planned Resource Changes"
+                  echo ""
+                  echo "| Action | Resource |"
+                  echo "|--------|----------|"
+                  cat plan_resources_table.txt
+                  echo ""
+                fi
+
+                if [[ -n "$PLAN_LINE" ]]; then
+                  echo "> ${PLAN_LINE}"
+                fi
+                if [[ -n "$RUN_URL" ]]; then
+                  echo ""
+                  echo "> :link: [View TFC Run](${RUN_URL})"
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+          exit 0
+
+      - name: Upload plan artifact
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            plan_output.txt
+            plan_readable.txt
+          retention-days: 5
+
+      - name: Parse plan summary
+        id: plan-summary
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          ADD=$(grep -c '# .* will be created' plan_readable.txt 2>/dev/null || true)
+          CHANGE=$(grep -c '# .* will be updated' plan_readable.txt 2>/dev/null || true)
+          DESTROY=$(grep -c '# .* will be destroyed' plan_readable.txt 2>/dev/null || true)
+          REPLACE=$(grep -c '# .* must be replaced' plan_readable.txt 2>/dev/null || true)
+          ADD=${ADD:-0}; CHANGE=${CHANGE:-0}; DESTROY=${DESTROY:-0}; REPLACE=${REPLACE:-0}
+
+          SUMMARY=$(jq -n \
+            --argjson add "$ADD" \
+            --argjson change "$CHANGE" \
+            --argjson destroy "$DESTROY" \
+            --argjson replace "$REPLACE" \
+            '{add: $add, change: $change, destroy: $destroy, replace: $replace, total: ($add + $change + $destroy + $replace)}')
+
+          echo "summary=$(echo "$SUMMARY" | jq -c '.')" >> "$GITHUB_OUTPUT"
+
+          # Output the resource table as multiline string for the PR comment
+          if [[ -s plan_resources_table.txt ]]; then
+            {
+              echo "plan_resources<<PLAN_TABLE_EOF"
+              cat plan_resources_table.txt
+              echo "PLAN_TABLE_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Handle no-changes (exit 0) — close PR
+        if: steps.plan.outputs.exitcode == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const tfcRunUrl = '${{ steps.plan.outputs.run_url }}';
+            let footer = `\n---\n📋 [Pipeline run](${runUrl})`;
+            if (tfcRunUrl) footer += ` · :link: [TFC Run](${tfcRunUrl})`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `### No Changes Detected\n\nThe Terraform plan shows no infrastructure changes for this module version bump. This typically means the workspace already reflects the target version (applied via another path).\n\n**Action**: Closing this PR as no changes are needed.\n\n_If this is unexpected, re-open the PR and investigate._${footer}`
+            });
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Handle plan error (exit 1) — label + auto-trigger Claude
+        if: steps.plan.outputs.exitcode == '1'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT || github.token }}
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const tfcRunUrl = '${{ steps.plan.outputs.run_url }}';
+            let footer = `📋 [Pipeline run](${runUrl})`;
+            if (tfcRunUrl) footer += ` · :link: [TFC Run](${tfcRunUrl})`;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['breaking-change', 'risk:critical']
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `### 🚨 Terraform Plan Failed\n\nThe plan command returned an error, indicating this module version bump introduces breaking changes that prevent planning.\n\n---\n${footer}`
+            });
+
+            // Auto-trigger Claude review (prevents loops by checking for existing comment)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            if (!comments.some(c => c.body.includes('@claude review and make a recommendation'))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '@claude review and make a recommendation'
+              });
+            }
+
+      - name: Handle validate error — label + auto-trigger Claude
+        if: steps.validate.outputs.exitcode != '0'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT || github.token }}
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const footer = `📋 [Pipeline run](${runUrl})`;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['breaking-change', 'risk:critical']
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `### 🚨 Terraform Validate Failed\n\nThe module version bump introduces breaking changes that prevent validation (e.g. new required variables, removed outputs, renamed interfaces).\n\nThis is more severe than a plan failure — the consumer code is incompatible with the new module version.\n\n---\n${footer}`
+            });
+
+            // Auto-trigger Claude review (prevents loops by checking for existing comment)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            if (!comments.some(c => c.body.includes('@claude review and make a recommendation'))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '@claude review and make a recommendation'
+              });
+            }
+
+  # ─────────────────────────────────────────────────
+  # Job 3: RISK ASSESSMENT — Deterministic decision matrix
+  # ─────────────────────────────────────────────────
+  risk-assessment:
+    name: "Risk Assessment"
+    needs: [classify, validate]
+    if: needs.validate.outputs.plan_exitcode == '2'
+    runs-on: ubuntu-latest
+    outputs:
+      analysis_result: ${{ steps.assess.outputs.result }}
+    steps:
+      - name: Assess risk from plan
+        id: assess
+        env:
+          VERSION_TYPE: ${{ needs.classify.outputs.version_type }}
+          PLAN_SUMMARY: ${{ needs.validate.outputs.plan_summary }}
+        run: |
+          # ── Parse plan summary ──
+          ADD=$(echo "$PLAN_SUMMARY" | jq -r '.add // 0')
+          CHANGE=$(echo "$PLAN_SUMMARY" | jq -r '.change // 0')
+          DESTROY=$(echo "$PLAN_SUMMARY" | jq -r '.destroy // 0')
+          REPLACE=$(echo "$PLAN_SUMMARY" | jq -r '.replace // 0')
+          TOTAL=$(echo "$PLAN_SUMMARY" | jq -r '.total // 0')
+
+          HAS_DESTRUCTIVE=false
+          if [[ "$DESTROY" -gt 0 ]] || [[ "$REPLACE" -gt 0 ]]; then
+            HAS_DESTRUCTIVE=true
+          fi
+
+          # ── Apply decision matrix ──
+          #
+          #                              PATCH/MINOR       MAJOR
+          # No adds, no changes         auto-merge/low    auto-merge/low
+          # Adds only, no changes       needs-review/low  needs-review/medium
+          # Changes (with or w/o adds)  needs-review/med  needs-review/high
+          # DESTROY/REPLACE             breaking/high     breaking/critical
+          # Plan fails (exit 1)         breaking/high     breaking/critical
+          #
+          # "adds" = new resources created. "changes" = existing resources modified.
+          # (Plan exit 1 is handled in validate job; this job only runs on exit 2)
+
+          if [[ "$HAS_DESTRUCTIVE" == "true" ]]; then
+            # DESTROY or REPLACE in plan — always block
+            if [[ "$VERSION_TYPE" == "major" ]]; then
+              DECISION="breaking-change"
+              RISK_LEVEL="critical"
+              RATIONALE="Plan contains destructive operations (destroy: ${DESTROY}, replace: ${REPLACE}) on a major version bump — merge blocked."
+            else
+              DECISION="breaking-change"
+              RISK_LEVEL="high"
+              RATIONALE="Plan contains destructive operations (destroy: ${DESTROY}, replace: ${REPLACE}) — merge blocked regardless of semver type."
+            fi
+          elif [[ "$ADD" -eq 0 ]] && [[ "$CHANGE" -eq 0 ]]; then
+            # No adds, no changes — safe to auto-merge
+            DECISION="auto-merge"
+            RISK_LEVEL="low"
+            RATIONALE="${VERSION_TYPE^} version bump with no planned changes — safe to auto-merge."
+          elif [[ "$ADD" -gt 0 ]] && [[ "$CHANGE" -eq 0 ]]; then
+            # Adds only, no changes to existing resources — low risk but needs review
+            DECISION="needs-review"
+            if [[ "$VERSION_TYPE" == "major" ]]; then
+              RISK_LEVEL="medium"
+              RATIONALE="Major version bump adding ${ADD} new resource(s) — new resources on a major bump require review."
+            else
+              RISK_LEVEL="low"
+              RATIONALE="${VERSION_TYPE^} version bump adding ${ADD} new resource(s) with no changes to existing — low risk, review recommended."
+            fi
+          else
+            # Changes to existing resources (with or without adds) — medium risk
+            DECISION="needs-review"
+            if [[ "$VERSION_TYPE" == "major" ]]; then
+              RISK_LEVEL="high"
+              RATIONALE="Major version bump with ${CHANGE} change(s) to existing resources — requires careful review."
+            else
+              RISK_LEVEL="medium"
+              RATIONALE="${VERSION_TYPE^} version bump with ${CHANGE} change(s) to existing resources (${ADD} add(s)) — modifications require review."
+            fi
+          fi
+
+          # ── Build structured JSON result (same schema Job 4 expects) ──
+          RESULT=$(jq -n \
+            --arg decision "$DECISION" \
+            --arg risk_level "$RISK_LEVEL" \
+            --arg version_type "$VERSION_TYPE" \
+            --argjson plan_summary "$PLAN_SUMMARY" \
+            --arg rationale "$RATIONALE" \
+            '{
+              decision: $decision,
+              risk_level: $risk_level,
+              version_type: $version_type,
+              breaking_changes: [],
+              security_findings: [],
+              plan_summary: $plan_summary,
+              adaptations_applied: [],
+              interface_diff: {},
+              rationale: $rationale
+            }')
+
+          echo "result=$(echo "$RESULT" | jq -c '.')" >> "$GITHUB_OUTPUT"
+
+          # ── Step summary ──
+          {
+            echo "## 3/4 — Risk Assessment"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Decision | \`${DECISION}\` |"
+            echo "| Risk Level | \`${RISK_LEVEL}\` |"
+            echo "| Version Type | \`${VERSION_TYPE}\` |"
+            echo ""
+            echo "### Plan Summary"
+            echo ""
+            echo "| Action | Count |"
+            echo "|--------|-------|"
+            echo "| Add | ${ADD} |"
+            echo "| Change | ${CHANGE} |"
+            echo "| Destroy | ${DESTROY} |"
+            echo "| Replace | ${REPLACE} |"
+            echo "| **Total** | **${TOTAL}** |"
+            echo ""
+            echo "### Rationale"
+            echo ""
+            echo "${RATIONALE}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────
+  # Job 4: DECISION — Act on risk assessment
+  # ─────────────────────────────────────────────────
+  decision:
+    name: "Decision"
+    needs: [classify, validate, risk-assessment]
+    if: needs.validate.outputs.plan_exitcode == '2'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse analysis result
+        id: parse
+        env:
+          ANALYSIS_RESULT: ${{ needs.risk-assessment.outputs.analysis_result }}
+          VERSION_TYPE: ${{ needs.classify.outputs.version_type }}
+          TFC_RUN_URL: ${{ needs.validate.outputs.run_url }}
+        run: |
+          echo "decision=$(echo "$ANALYSIS_RESULT" | jq -r '.decision')" >> "$GITHUB_OUTPUT"
+          echo "risk_level=$(echo "$ANALYSIS_RESULT" | jq -r '.risk_level')" >> "$GITHUB_OUTPUT"
+          echo "rationale=$(echo "$ANALYSIS_RESULT" | jq -r '.rationale')" >> "$GITHUB_OUTPUT"
+
+          # ── Step summary ──
+          DECISION=$(echo "$ANALYSIS_RESULT" | jq -r '.decision')
+          RISK=$(echo "$ANALYSIS_RESULT" | jq -r '.risk_level')
+
+          case "$DECISION" in
+            auto-merge)       ICON="white_check_mark"; ACTION="Auto-merging PR" ;;
+            needs-review)     ICON="eyes";             ACTION="Requesting human review" ;;
+            breaking-change)  ICON="rotating_light";   ACTION="Blocking merge — manual intervention required" ;;
+            *)                ICON="question";         ACTION="Unknown decision" ;;
+          esac
+
+          {
+            echo "## 4/4 — Decision"
+            echo ""
+            echo ":${ICON}: **${DECISION}** (risk: \`${RISK}\`, version: \`${VERSION_TYPE}\`)"
+            echo ""
+            echo "**Action**: ${ACTION}"
+            if [[ -n "$TFC_RUN_URL" ]]; then
+              echo ""
+              echo ":link: [View TFC Run](${TFC_RUN_URL})"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const decision = '${{ steps.parse.outputs.decision }}';
+            const riskLevel = '${{ steps.parse.outputs.risk_level }}';
+            const versionType = '${{ needs.classify.outputs.version_type }}';
+
+            const labels = [`risk:${riskLevel}`];
+
+            if (decision === 'auto-merge') labels.push('auto-merge');
+            else if (decision === 'needs-review') labels.push('needs-review');
+            else if (decision === 'breaking-change') labels.push('breaking-change');
+
+            labels.push(`version:${versionType}`);
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: labels
+            });
+
+            // Update PR title with semver tag
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            let prefix = '';
+            if (decision === 'breaking-change') prefix = '[BREAKING] ';
+            else if (versionType === 'major') prefix = '[MAJOR] ';
+            else if (versionType === 'minor') prefix = '[minor] ';
+            else prefix = '[patch] ';
+
+            const currentTitle = pr.data.title;
+            if (!currentTitle.startsWith('[')) {
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                title: `${prefix}${currentTitle}`
+              });
+            }
+
+      - name: Post analysis comment + auto-trigger Claude review
+        uses: actions/github-script@v7
+        env:
+          ANALYSIS_RESULT: ${{ needs.risk-assessment.outputs.analysis_result }}
+          MODULES_CHANGED: ${{ needs.classify.outputs.modules_changed }}
+          PLAN_RESOURCES: ${{ needs.validate.outputs.plan_resources }}
+          TFC_RUN_URL: ${{ needs.validate.outputs.run_url }}
+        with:
+          github-token: ${{ secrets.GH_PAT || github.token }}
+          script: |
+            const result = JSON.parse(process.env.ANALYSIS_RESULT);
+            const modulesChanged = JSON.parse(process.env.MODULES_CHANGED);
+            const decision = result.decision;
+            const risk = result.risk_level;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Decision banner
+            const banners = {
+              'auto-merge':        { emoji: '✅', label: 'Auto-Merge Approved' },
+              'needs-review':      { emoji: '👀', label: 'Review Required' },
+              'breaking-change':   { emoji: '🚨', label: 'Breaking Change' },
+            };
+            const banner = banners[decision] || { emoji: '❓', label: decision };
+
+            let body = `## ${banner.emoji} Module Upgrade Risk Assessment — ${banner.label}\n\n`;
+
+            // ── Module version table ──
+            body += `### Module Versions\n\n`;
+            body += `| Module | Old | | New | Bump |\n`;
+            body += `|--------|-----|-|-----|------|\n`;
+            for (const m of modulesChanged) {
+              body += `| \`${m.module}\` | \`${m.old_version}\` | → | \`${m.new_version}\` | \`${m.bump_type}\` |\n`;
+            }
+            body += `\n`;
+
+            // ── Summary table ──
+            body += `### Analysis Summary\n\n`;
+            body += `| | |\n|---|---|\n`;
+            body += `| **Decision** | \`${decision}\` |\n`;
+            body += `| **Risk Level** | \`${risk}\` |\n`;
+            body += `| **Version Type** | \`${result.version_type}\` |\n\n`;
+
+            // ── Plan changes table ──
+            const plan = result.plan_summary || {};
+            const planTotal = (plan.add || 0) + (plan.change || 0) + (plan.destroy || 0) + (plan.replace || 0);
+
+            body += `### Plan Changes\n\n`;
+            body += `| Action | Count |\n`;
+            body += `|--------|-------|\n`;
+            body += `| :white_check_mark: **Add** | ${plan.add || 0} |\n`;
+            body += `| :warning: **Change** | ${plan.change || 0} |\n`;
+            body += `| :bangbang: **Destroy** | ${plan.destroy || 0} |\n`;
+            body += `| :warning: **Replace** | ${plan.replace || 0} |\n`;
+            body += `| **Total** | **${planTotal}** |\n\n`;
+
+            // ── Plan resource table ──
+            const planResources = process.env.PLAN_RESOURCES || '';
+            if (planResources.trim()) {
+              body += `### Planned Resource Changes\n\n`;
+              body += `| Action | Resource |\n`;
+              body += `|--------|----------|\n`;
+              body += planResources.trim() + `\n\n`;
+            }
+
+            // ── Rationale ──
+            body += `### Rationale\n\n${result.rationale}\n\n`;
+
+            // ── Footer ──
+            const tfcRunUrl = process.env.TFC_RUN_URL || '';
+            body += `---\n`;
+            body += `📋 [Pipeline run](${runUrl})`;
+            if (tfcRunUrl) {
+              body += ` · :link: [TFC Run](${tfcRunUrl})`;
+            }
+
+            if (decision === 'auto-merge') {
+              body += `\n\n✅ This PR was auto-merged.\n`;
+            } else if (decision === 'needs-review' || decision === 'breaking-change') {
+              body += `\n\n🔧 Claude will automatically review this PR and make a recommendation.\n`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+            // Auto-trigger Claude review for needs-review and breaking-change.
+            // Uses GH_PAT so the comment triggers a new issue_comment workflow run.
+            // Loop prevention: skip if already requested.
+            if (decision === 'needs-review' || decision === 'breaking-change') {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+              if (!comments.some(c => c.body.includes('@claude review and make a recommendation'))) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: '@claude review and make a recommendation'
+                });
+              }
+            }
+
+      # Auto-merge for low-risk patches/minor
+      - name: Auto-merge
+        if: steps.parse.outputs.decision == 'auto-merge' && steps.parse.outputs.risk_level == 'low'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              merge_method: 'squash'
+            });
+
+      # Request review for medium+ risk
+      - name: Request review
+        if: steps.parse.outputs.decision == 'needs-review'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              // Request review from CODEOWNERS
+              const { data: reviewers } = await github.rest.repos.getCodeownersErrors({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+
+              // Fallback: request review from repo admins
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                team_reviewers: ['platform-team']
+              });
+            } catch (e) {
+              console.log('Could not request reviewers:', e.message);
+            }

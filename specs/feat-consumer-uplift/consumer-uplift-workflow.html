@@ -1,0 +1,1587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consumer Module Uplift Workflow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --red: #C4283A;
+  --red-light: #D4434F;
+  --bg: #FAFAF8;
+  --bg-warm: #F5F3EF;
+  --bg-code: #F0EDE8;
+  --text: #1A1A1A;
+  --text-body: #3D3D3D;
+  --text-muted: #6B6B6B;
+  --text-caption: #8A8A8A;
+  --border: #E0DCD4;
+  --border-light: #EBE8E2;
+  --serif: 'Playfair Display', Georgia, serif;
+  --sans: 'Source Sans 3', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --max-w: 1100px;
+  --pink: #C4283A; --cyan: #1A6B7A; --purple: #6B3FA0;
+  --green: #2D7A4F; --orange: #B87333; --yellow: #9A7B2D;
+  --ice: #4A6B8A; --cmd-red: #A03030;
+}
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text-body);
+  font-family: var(--sans); font-size: 17px; line-height: 1.72;
+  padding: 50px 0 70px;
+}
+
+/* === READING PROGRESS BAR === */
+#progress-bar {
+  position: fixed; top: 0; left: 0; height: 2px; width: 0%;
+  background: var(--red); z-index: 100; transition: width 0.1s linear;
+}
+
+/* === STICKY HEADER === */
+#header {
+  position: fixed; top: 2px; left: 0; right: 0; z-index: 50;
+  height: 48px; background: rgba(250,250,248,0.97);
+  border-bottom: 1px solid var(--border-light);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  display: flex; align-items: center; padding: 0 28px;
+}
+#header-title {
+  font-family: var(--serif); font-size: 14px; font-weight: 700;
+  color: var(--text); letter-spacing: 0.3px; cursor: pointer;
+}
+#header-title span { color: var(--red); }
+#header-nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+.header-link {
+  font-family: var(--sans); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-caption);
+  padding: 6px 12px; border-radius: 4px; cursor: pointer; border: none;
+  background: transparent; transition: all 0.2s; text-decoration: none;
+}
+.header-link:hover { color: var(--text); background: rgba(0,0,0,0.03); }
+.header-link.active { color: var(--red); }
+#search-btn {
+  width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+  background: white; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 13px; color: var(--text-muted);
+  margin-left: 6px; transition: all 0.2s;
+}
+#search-btn:hover { border-color: var(--red); color: var(--red); }
+#toc-toggle {
+  width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+  background: white; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 14px; color: var(--text-muted);
+  margin-left: 6px; transition: all 0.2s;
+}
+#toc-toggle:hover { border-color: var(--red); color: var(--red); }
+
+/* === TOC PANEL === */
+#toc-panel {
+  position: fixed; top: 50px; right: 0; width: 300px; bottom: 0;
+  background: white; border-left: 1px solid var(--border-light);
+  z-index: 40; transform: translateX(100%); transition: transform 0.3s ease;
+  overflow-y: auto; padding: 24px 20px;
+}
+#toc-panel.open { transform: translateX(0); }
+#toc-panel h3 {
+  font-family: var(--serif); font-size: 14px; font-weight: 700;
+  color: var(--text); margin-bottom: 16px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.toc-section { margin-bottom: 16px; }
+.toc-section-title {
+  font-family: var(--sans); font-size: 10px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase; color: var(--red);
+  margin-bottom: 6px;
+}
+.toc-link {
+  display: block; font-size: 13px; color: var(--text-muted); padding: 3px 0 3px 12px;
+  text-decoration: none; border-left: 2px solid transparent; transition: all 0.2s;
+  cursor: pointer;
+}
+.toc-link:hover { color: var(--text); border-left-color: var(--border); }
+.toc-link.active { color: var(--red); border-left-color: var(--red); font-weight: 600; }
+
+/* === SEARCH OVERLAY === */
+#search-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200;
+  background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+  display: none; align-items: flex-start; justify-content: center; padding-top: 100px;
+}
+#search-overlay.open { display: flex; }
+#search-box {
+  width: 560px; max-width: 90vw; background: white;
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15); overflow: hidden;
+}
+#search-input {
+  width: 100%; background: transparent; border: none;
+  border-bottom: 1px solid var(--border-light);
+  padding: 16px 20px; color: var(--text); font-family: var(--mono);
+  font-size: 14px; outline: none;
+}
+#search-input::placeholder { color: var(--text-caption); }
+#search-results { max-height: 360px; overflow-y: auto; padding: 8px; }
+.search-result {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-radius: 6px; cursor: pointer; transition: background 0.15s;
+}
+.search-result:hover, .search-result.selected { background: var(--bg-warm); }
+.search-result .sr-type {
+  font-size: 8px; letter-spacing: 1px; text-transform: uppercase; padding: 2px 6px;
+  border-radius: 3px; border: 1px solid; white-space: nowrap; min-width: 48px;
+  text-align: center; font-family: var(--mono);
+}
+.search-result .sr-name { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.search-result .sr-desc { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.search-empty { padding: 20px; text-align: center; color: var(--text-caption); font-size: 13px; }
+
+/* === HERO / LANDING === */
+#landing {
+  padding: 80px 28px 60px; text-align: center;
+  max-width: var(--max-w); margin: 0 auto;
+}
+.landing-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--red); margin-bottom: 20px;
+}
+.landing-headline {
+  font-family: var(--serif); font-size: 42px; font-weight: 800;
+  color: var(--text); line-height: 1.15; margin-bottom: 20px;
+}
+.landing-body {
+  font-size: 18px; line-height: 1.7; color: var(--text-muted);
+  max-width: 600px; margin: 0 auto 36px; font-weight: 300;
+}
+
+/* === PILLAR CARDS === */
+.pillar-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+  max-width: var(--max-w); margin: 0 auto 48px; padding: 0 28px;
+}
+.pillar-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 24px;
+  background: white; transition: all 0.2s;
+}
+.pillar-card:hover { border-color: var(--text-caption); box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+.pillar-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
+  text-transform: uppercase; margin-bottom: 10px;
+}
+.pillar-card p { font-size: 14px; line-height: 1.65; color: var(--text-muted); }
+.pillar-card code {
+  font-family: var(--mono); font-size: 11px; background: var(--bg-code);
+  padding: 1px 5px; border-radius: 3px; color: var(--red);
+}
+
+/* === SECTIONS & CHAPTERS === */
+.chapter {
+  max-width: var(--max-w); margin: 0 auto; padding: 0 28px;
+}
+.chapter-divider {
+  text-align: center; padding: 80px 28px 48px;
+  border-top: 1px solid var(--border);
+  max-width: var(--max-w); margin: 0 auto;
+  scroll-margin-top: 40px;
+}
+.chapter-divider:first-of-type { border-top: none; padding-top: 0; }
+.chapter-number {
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--red);
+  margin-bottom: 12px;
+}
+.chapter-title {
+  font-family: var(--serif); font-size: 36px; font-weight: 800;
+  color: var(--text); line-height: 1.2; margin-bottom: 12px;
+}
+.chapter-subtitle {
+  font-family: var(--sans); font-size: 16px; color: var(--text-muted);
+  font-weight: 300; max-width: 540px; margin: 0 auto;
+}
+
+/* === SUBSECTION === */
+.subsection {
+  max-width: var(--max-w); margin: 0 auto; padding: 0 28px 48px;
+  scroll-margin-top: 80px;
+  opacity: 0; transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.subsection.revealed { opacity: 1; transform: translateY(0); }
+.subsection-title {
+  font-family: var(--serif); font-size: 24px; font-weight: 700;
+  color: var(--text); margin-bottom: 6px;
+}
+.subsection-desc {
+  font-size: 14px; color: var(--text-muted); margin-bottom: 20px;
+  font-weight: 300;
+}
+
+/* === SVG DIAGRAM === */
+.svg-diagram { max-width: 100%; margin: 0 auto 24px; }
+.svg-diagram svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+/* === CARDS === */
+.card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.card-grid.triple { grid-template-columns: 1fr 1fr 1fr; }
+.card-grid.single { grid-template-columns: 1fr; }
+.ed-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 20px;
+  background: white; transition: border-color 0.2s;
+}
+.ed-card:hover { border-color: var(--text-caption); }
+.ed-card h3 {
+  font-family: var(--serif); font-size: 16px; font-weight: 700;
+  color: var(--text); margin-bottom: 8px;
+}
+.ed-card p { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-bottom: 6px; }
+.ed-card ul { font-size: 12px; color: var(--text-muted); line-height: 1.7; padding-left: 18px; }
+.ed-card .card-detail { font-size: 12px; color: var(--text-caption); line-height: 1.5; font-style: italic; }
+.ed-card code {
+  font-family: var(--mono); font-size: 11px; background: var(--bg-code);
+  padding: 1px 5px; border-radius: 3px; color: var(--red);
+}
+
+/* === EXPANDABLE CARDS (details/summary) === */
+details.ed-card { cursor: pointer; }
+details.ed-card summary {
+  list-style: none; position: relative; outline: none;
+}
+details.ed-card summary::-webkit-details-marker,
+details.ed-card summary::marker { display: none; }
+details.ed-card summary::after {
+  content: '▸'; position: absolute; top: 0; right: 0;
+  font-size: 14px; color: var(--text-caption); transition: transform 0.2s ease;
+}
+details.ed-card[open] summary::after { transform: rotate(90deg); }
+.card-expand {
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  font-family: var(--sans); font-size: 13px; line-height: 1.65; color: var(--text-body);
+}
+.card-expand ul { margin: 8px 0 8px 16px; list-style: disc; }
+.card-expand li { margin-bottom: 4px; }
+.card-expand code {
+  font-family: var(--mono); font-size: 11px; background: var(--bg-warm);
+  padding: 1px 5px; border-radius: 3px;
+}
+.card-expand pre {
+  margin: 8px 0; padding: 10px 12px; background: var(--bg-warm);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; overflow-x: auto;
+  white-space: pre-wrap;
+}
+.card-expand .card-detail { margin-top: 10px; }
+.card-expand .expand-ref {
+  margin-top: 8px; font-size: 11px; color: var(--text-caption);
+  font-family: var(--mono);
+}
+details.ed-card::details-content {
+  transition: height 0.3s ease, content-visibility 0.3s ease allow-discrete;
+  height: 0; overflow: clip;
+}
+details.ed-card[open]::details-content { height: auto; }
+
+/* === NODES === */
+.node {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+  border-radius: 4px; font-size: 11px; font-family: var(--mono);
+  margin: 2px 1px; border: 1px solid; white-space: nowrap;
+}
+.node-agent { background: rgba(196,40,58,0.06); border-color: rgba(196,40,58,0.25); color: var(--pink); }
+.node-skill { background: rgba(26,107,122,0.06); border-color: rgba(26,107,122,0.25); color: var(--cyan); }
+.node-template { background: rgba(107,63,160,0.06); border-color: rgba(107,63,160,0.25); color: var(--purple); }
+.node-script { background: rgba(45,122,79,0.06); border-color: rgba(45,122,79,0.25); color: var(--green); }
+.node-artifact { background: rgba(184,115,51,0.06); border-color: rgba(184,115,51,0.25); color: var(--orange); }
+.node-mcp { background: rgba(154,123,45,0.06); border-color: rgba(154,123,45,0.25); color: var(--yellow); }
+.node-ref { background: rgba(74,107,138,0.06); border-color: rgba(74,107,138,0.25); color: var(--ice); }
+.node-cmd { background: rgba(160,48,48,0.06); border-color: rgba(160,48,48,0.25); color: var(--cmd-red); }
+.node-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+
+/* === DECISION MATRIX === */
+.matrix-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  border-radius: 8px; overflow: hidden; margin: 16px 0 24px;
+  border: 1px solid var(--border);
+}
+.matrix-table th {
+  background: var(--bg-warm); font-family: var(--mono); font-size: 10px;
+  letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted);
+  padding: 10px 14px; text-align: center; border-bottom: 1px solid var(--border);
+}
+.matrix-table th:first-child { text-align: left; }
+.matrix-table td {
+  padding: 8px 14px; font-size: 12px; color: var(--text-body);
+  border-bottom: 1px solid var(--border-light); text-align: center;
+  font-family: var(--mono); font-size: 11px;
+}
+.matrix-table td:first-child {
+  text-align: left; font-family: var(--sans); font-size: 13px;
+  color: var(--text-muted); font-weight: 400;
+}
+.matrix-table tr:last-child td { border-bottom: none; }
+.risk-low { background: rgba(45,122,79,0.18); color: #1B5E3A; font-weight: 700; }
+.risk-med { background: rgba(154,123,45,0.18); color: #7A6220; font-weight: 700; }
+.risk-high { background: rgba(184,115,51,0.20); color: #8B5A1E; font-weight: 700; }
+.risk-crit { background: rgba(196,40,58,0.18); color: #9B1B2D; font-weight: 700; }
+
+/* === ARTIFACT TABLE === */
+.artifact-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  border-radius: 8px; overflow: hidden; margin: 12px 0 20px;
+  border: 1px solid var(--border);
+}
+.artifact-table th {
+  background: var(--bg-warm); font-family: var(--mono); font-size: 10px;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);
+  padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.artifact-table td {
+  padding: 8px 12px; font-size: 13px; color: var(--text-body);
+  border-bottom: 1px solid var(--border-light);
+}
+.artifact-table td:first-child { font-family: var(--mono); font-size: 11px; color: var(--red); }
+.artifact-table tr:last-child td { border-bottom: none; }
+
+/* === LEGEND === */
+.legend { display: flex; justify-content: center; gap: 16px; padding: 8px 0 16px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; letter-spacing: 0.5px; color: var(--text-caption); }
+.legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* === RESPONSIVE === */
+@media (max-width:900px) {
+  .pillar-grid { grid-template-columns: 1fr; }
+  .card-grid, .card-grid.triple { grid-template-columns: 1fr; }
+  .landing-headline { font-size: 32px; }
+  .chapter-title { font-size: 28px; }
+  .svg-diagram { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .svg-diagram svg { min-width: 1000px; }
+}
+</style>
+</head>
+<body>
+
+<!-- PROGRESS BAR -->
+<div id="progress-bar"></div>
+
+<!-- HEADER -->
+<div id="header">
+  <div id="header-title" onclick="scrollTo({top:0,behavior:'smooth'})"><span>Consumer Module</span> Uplift</div>
+  <div id="header-nav">
+    <button class="header-link active" onclick="scrollToSection('landing')">Overview</button>
+    <button class="header-link" onclick="scrollToSection('pipeline-section')">Pipeline</button>
+    <button class="header-link" onclick="scrollToSection('escalation-section')">Escalation</button>
+    <button class="header-link" onclick="scrollToSection('decision-section')">Decision</button>
+    <button id="search-btn" onclick="openSearch()" title="Search (/)">&#x2315;</button>
+    <button id="toc-toggle" onclick="toggleTOC()" title="Table of Contents">&#x2630;</button>
+  </div>
+</div>
+
+<!-- TOC PANEL -->
+<div id="toc-panel">
+  <h3>Table of Contents</h3>
+  <div id="toc-content"></div>
+</div>
+
+<!-- SEARCH OVERLAY -->
+<div id="search-overlay">
+  <div id="search-box">
+    <input id="search-input" type="text" placeholder="Search sections, components, concepts..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+</div>
+
+<!-- ===== LANDING ===== -->
+<section id="landing" data-section="landing">
+  <div class="landing-eyebrow">USE CASE 1 -- CONSUMER MODULE UPLIFT</div>
+  <h1 class="landing-headline">Automated Module Version Upgrades for HCP Terraform Consumers</h1>
+  <p class="landing-body">A connected GitHub Actions pipeline that detects module version bumps, validates with Terraform, applies a deterministic risk matrix, and auto-merges safe changes -- with <code>@claude</code> interactive escalation for complex upgrades.</p>
+</section>
+
+<!-- PILLAR CARDS -->
+<div class="pillar-grid">
+  <div class="pillar-card">
+    <div class="pillar-label" style="color:var(--cyan)">DETECT</div>
+    <p>Dependabot scans the private registry monthly. A fallback cron scanner catches submodule paths Dependabot misses. Both create PRs in the same format.</p>
+  </div>
+  <div class="pillar-card">
+    <div class="pillar-label" style="color:var(--purple)">ASSESS</div>
+    <p>A deterministic risk matrix classifies changes by semver type, plan exit code, and destroy/replace presence. No AI needed -- purely scripted.</p>
+  </div>
+  <div class="pillar-card">
+    <div class="pillar-label" style="color:var(--green)">DECIDE</div>
+    <p>Structured JSON output drives deterministic decisions: auto-merge zero-change plans, request review for any changes, block breaking changes. <code>@claude</code> for follow-up.</p>
+  </div>
+</div>
+
+<!-- ===== CONNECTED PIPELINE ===== -->
+<div class="chapter-divider" id="pipeline-section" data-section="pipeline-section">
+  <div class="chapter-number">Connected Pipeline</div>
+  <h2 class="chapter-title">Two Workflows, One Pipeline</h2>
+  <p class="chapter-subtitle">Two <code>.yml</code> files work in concert: the uplift workflow runs deterministic Jobs 1-4 on PRs, and a separate Claude Review workflow handles interactive <code>@claude</code> follow-up -- connected by PR comments and <code>synchronize</code> events</p>
+</div>
+
+<div class="subsection" id="pipeline-diagram" data-sub="Pipeline Diagram">
+  <div class="svg-diagram" style="max-width:100%">
+    <svg id="pipeline-svg" viewBox="0 0 1200 680" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="pipe-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#E0DCD4" stroke-width="0.3" opacity="0.4"/>
+        </pattern>
+        <filter id="pipe-shadow" x="-5%" y="-5%" width="110%" height="120%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.08"/>
+        </filter>
+        <filter id="glow-teal" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.1  0 0 0 0 0.42  0 0 0 0 0.48  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-orange" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.72  0 0 0 0 0.45  0 0 0 0 0.2  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-purple" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.25  0 0 0 0 0.63  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-red" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.77  0 0 0 0 0.16  0 0 0 0 0.23  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-green" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.18  0 0 0 0 0.48  0 0 0 0 0.31  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-yellow" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.6  0 0 0 0 0.48  0 0 0 0 0.18  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-ice" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.29  0 0 0 0 0.42  0 0 0 0 0.54  0 0 0 1 0" result="color"/>
+          <feMerge><feMergeNode in="color"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Background -->
+      <rect id="bg-fill" x="0" y="0" width="1200" height="680" rx="12" fill="#FAFAF8"/>
+      <rect id="bg-grid" x="0" y="0" width="1200" height="680" rx="12" fill="url(#pipe-grid)"/>
+      <rect id="bg-border" x="0" y="0" width="1200" height="680" rx="12" fill="none" stroke="none"/>
+
+      <!-- ============================================ -->
+      <!-- === DEPENDABOT (centered above workflow) === -->
+      <!-- ============================================ -->
+      <g filter="url(#pipe-shadow)">
+        <rect x="275" y="15" width="200" height="65" rx="10" fill="#4A6B8A"/>
+      </g>
+      <text x="375" y="37" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" letter-spacing="2.5" font-weight="600" opacity="0.8">GITHUB</text>
+      <text x="375" y="56" text-anchor="middle" font-family="Playfair Display,serif" font-size="19" fill="white" font-weight="700">Dependabot</text>
+      <text x="375" y="72" text-anchor="middle" font-size="11" fill="white" opacity="0.75">Monthly registry scan</text>
+
+      <!-- Path: Dependabot to workflow box -->
+      <line x1="375" y1="80" x2="375" y2="110" stroke="#4A6B8A" stroke-width="1.5" opacity="0.15"/>
+
+      <!-- ============================================ -->
+      <!-- === WORKFLOW BOX ============================ -->
+      <!-- ============================================ -->
+      <rect x="25" y="110" width="700" height="280" rx="10" fill="none" stroke="#E0DCD4" stroke-width="1.5" stroke-dasharray="6 3"/>
+      <text x="375" y="128" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A" letter-spacing="1.5" opacity="0.7">WORKFLOW 1</text>
+      <text x="375" y="143" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="#8A8A8A" letter-spacing="3">terraform-consumer-uplift.yml</text>
+
+      <!-- Trigger labels -->
+      <text x="50" y="162" font-family="JetBrains Mono,monospace" font-size="10" fill="#1A6B7A" font-weight="700" letter-spacing="1.5">on: pull_request</text>
+      <text x="220" y="162" font-family="Source Sans 3,sans-serif" font-size="12" fill="#6B6B6B">opened, synchronize &#8594; Jobs 1 &#8594; 2 &#8594; 3 &#8594; 4</text>
+
+      <!-- ============================================ -->
+      <!-- === JOBS 1-4 ROW ============================ -->
+      <!-- ============================================ -->
+
+      <!-- JOB 1: x=45, w=155, center=122 -->
+      <g id="job1-box" style="cursor:pointer" onclick="toggleJobDetail(1)">
+        <g filter="url(#pipe-shadow)">
+          <rect x="45" y="175" width="155" height="78" rx="10" fill="#1A6B7A"/>
+        </g>
+        <text x="122" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" letter-spacing="2.5" font-weight="600" opacity="0.8">JOB 1</text>
+        <text x="122" y="218" text-anchor="middle" font-family="Playfair Display,serif" font-size="18" fill="white" font-weight="700">Classify</text>
+        <text x="122" y="240" text-anchor="middle" font-size="11" fill="white" opacity="0.75">Semver from git diff</text>
+        <text x="185" y="194" font-size="10" fill="white" opacity="0.5">&#9660;</text>
+      </g>
+
+      <!-- Arrow: Job1 to Job2 -->
+      <line x1="200" y1="214" x2="215" y2="214" stroke="#C0BDB5" stroke-width="1.5" opacity="0.2"/>
+      <polygon points="213,210 220,214 213,218" fill="#C0BDB5" opacity="0.35"/>
+
+      <!-- JOB 2: x=220, w=155, center=297 -->
+      <g id="job2-box" style="cursor:pointer" onclick="toggleJobDetail(2)">
+        <g filter="url(#pipe-shadow)">
+          <rect x="220" y="175" width="155" height="78" rx="10" fill="#B87333"/>
+        </g>
+        <text x="297" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" letter-spacing="2.5" font-weight="600" opacity="0.8">JOB 2</text>
+        <text x="297" y="218" text-anchor="middle" font-family="Playfair Display,serif" font-size="18" fill="white" font-weight="700">Validate</text>
+        <text x="297" y="240" text-anchor="middle" font-size="11" fill="white" opacity="0.75">fmt, validate, plan</text>
+        <text x="360" y="194" font-size="10" fill="white" opacity="0.5">&#9660;</text>
+      </g>
+
+      <!-- Arrow: Job2 to Job3 -->
+      <line x1="375" y1="214" x2="390" y2="214" stroke="#C0BDB5" stroke-width="1.5" opacity="0.2"/>
+      <polygon points="388,210 395,214 388,218" fill="#C0BDB5" opacity="0.35"/>
+
+      <!-- JOB 3: x=395, w=155, center=472 -->
+      <g id="job3-box" style="cursor:pointer" onclick="toggleJobDetail(3)">
+        <g filter="url(#pipe-shadow)">
+          <rect x="395" y="175" width="155" height="78" rx="10" fill="#6B3FA0"/>
+        </g>
+        <text x="472" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" letter-spacing="2.5" font-weight="600" opacity="0.8">JOB 3</text>
+        <text x="472" y="218" text-anchor="middle" font-family="Playfair Display,serif" font-size="18" fill="white" font-weight="700">Risk Assess</text>
+        <text x="472" y="240" text-anchor="middle" font-size="11" fill="white" opacity="0.75">deterministic matrix</text>
+        <text x="535" y="194" font-size="10" fill="white" opacity="0.5">&#9660;</text>
+      </g>
+
+      <!-- Arrow: Job3 to Job4 -->
+      <line x1="550" y1="214" x2="565" y2="214" stroke="#C0BDB5" stroke-width="1.5" opacity="0.2"/>
+      <polygon points="563,210 570,214 563,218" fill="#C0BDB5" opacity="0.35"/>
+
+      <!-- JOB 4: x=570, w=135, center=637 -->
+      <g id="job4-box" style="cursor:pointer" onclick="toggleJobDetail(4)">
+        <g filter="url(#pipe-shadow)">
+          <rect x="570" y="175" width="135" height="78" rx="10" fill="#C4283A"/>
+        </g>
+        <text x="637" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" letter-spacing="2.5" font-weight="600" opacity="0.8">JOB 4</text>
+        <text x="637" y="218" text-anchor="middle" font-family="Playfair Display,serif" font-size="18" fill="white" font-weight="700">Decision</text>
+        <text x="637" y="240" text-anchor="middle" font-size="11" fill="white" opacity="0.75">fromJSON() &#8594; action</text>
+        <text x="690" y="194" font-size="10" fill="white" opacity="0.5">&#9660;</text>
+      </g>
+
+      <!-- @claude label at bottom of workflow box -->
+      <text x="375" y="375" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A" opacity="0.5">Jobs 1-4 re-run when @claude pushes fixes (synchronize event)</text>
+
+      <!-- ============================================ -->
+      <!-- === CLAUDE REVIEW WORKFLOW BOX ============= -->
+      <!-- ============================================ -->
+
+      <!-- Curved paths from NEEDS-REVIEW and BREAKING-CHANGE outcomes down to Claude Review -->
+      <path d="M 865 280 C 865 360, 650 430, 520 440" fill="none" stroke="#9A7B2D" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.25"/>
+      <polygon points="524,437 517,441 522,444" fill="#9A7B2D" opacity="0.4"/>
+      <text x="740" y="372" font-family="JetBrains Mono,monospace" font-size="8" fill="#9A7B2D" opacity="0.6">@claude review</text>
+      <path d="M 865 350 C 865 400, 680 440, 520 448" fill="none" stroke="#C4283A" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.25"/>
+      <polygon points="524,445 517,449 522,452" fill="#C4283A" opacity="0.4"/>
+
+      <!-- Claude Review workflow box -->
+      <rect x="100" y="430" width="550" height="110" rx="10" fill="none" stroke="#9A7B2D" stroke-width="1.5" stroke-dasharray="6 3"/>
+      <text x="375" y="448" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#9A7B2D" letter-spacing="1.5" opacity="0.7">WORKFLOW 2</text>
+      <text x="375" y="463" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" fill="#9A7B2D" letter-spacing="3">terraform-claude-review.yml</text>
+
+      <!-- Trigger label -->
+      <text x="120" y="483" font-family="JetBrains Mono,monospace" font-size="10" fill="#9A7B2D" font-weight="700" letter-spacing="1.5">on: issue_comment</text>
+      <text x="290" y="483" font-family="Source Sans 3,sans-serif" font-size="12" fill="#6B6B6B">@claude mentioned in PR comment</text>
+
+      <!-- Gate job -->
+      <g filter="url(#pipe-shadow)">
+        <rect x="135" y="497" width="120" height="32" rx="8" fill="#9A7B2D"/>
+      </g>
+      <text x="195" y="518" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" font-weight="600">Gate</text>
+      <text x="195" y="527" text-anchor="middle" font-size="8" fill="white" opacity="0.75">skip if bot</text>
+
+      <!-- Arrow: Gate to Claude Review -->
+      <line x1="255" y1="513" x2="285" y2="513" stroke="#C0BDB5" stroke-width="1.5" opacity="0.2"/>
+      <polygon points="283,509 290,513 283,517" fill="#C0BDB5" opacity="0.35"/>
+
+      <!-- Claude Review job -->
+      <g filter="url(#pipe-shadow)">
+        <rect x="290" y="497" width="185" height="32" rx="8" fill="#9A7B2D"/>
+      </g>
+      <text x="382" y="518" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="white" font-weight="600">Claude Review</text>
+      <text x="382" y="527" text-anchor="middle" font-size="8" fill="white" opacity="0.75">diagnose + fix + push</text>
+
+      <!-- Dashed arrow: Claude Review back up to Workflow 1 (synchronize re-trigger) -->
+      <path d="M 475 513 Q 540 513, 565 475 Q 590 435, 560 395 L 375 395 L 375 390" fill="none" stroke="#1A6B7A" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.3"/>
+      <polygon points="372,393 375,386 378,393" fill="#1A6B7A" opacity="0.45"/>
+      <text x="590" y="450" font-family="JetBrains Mono,monospace" font-size="9" fill="#1A6B7A" opacity="0.55" font-weight="500">synchronize</text>
+      <text x="590" y="460" font-family="JetBrains Mono,monospace" font-size="7" fill="#1A6B7A" opacity="0.4">re-triggers WF1</text>
+
+      <!-- Feedback loop label -->
+      <text x="375" y="560" text-anchor="middle" font-family="Source Sans 3,sans-serif" font-size="11" fill="#8A8A8A" opacity="0.6" font-style="italic">Decision posts @claude review comment &#8594; Claude Review workflow fixes + pushes &#8594; synchronize re-triggers uplift pipeline</text>
+
+      <!-- ============================================ -->
+      <!-- === DETAIL PANELS =========================== -->
+      <!-- ============================================ -->
+
+      <!-- JOB 1 DETAIL -->
+      <g id="job1-detail" visibility="hidden">
+        <g filter="url(#pipe-shadow)">
+          <rect x="25" y="265" width="700" height="100" rx="8" fill="white" stroke="#1A6B7A" stroke-width="1.5"/>
+        </g>
+        <rect x="25" y="265" width="700" height="4" rx="2" fill="#1A6B7A"/>
+        <text x="45" y="290" font-family="JetBrains Mono,monospace" font-size="11" fill="#1A6B7A" letter-spacing="1.5" font-weight="700">JOB 1: SEMVER CLASSIFICATION</text>
+        <text x="45" y="310" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Parses git diff to find module source URL changes. Extracts old/new versions, classifies as patch, minor, or major.</text>
+        <text x="45" y="326" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A">Script: classify-version-bump.sh</text>
+        <rect x="45" y="336" width="72" height="18" rx="4" fill="#1A6B7A" opacity="0.08"/>
+        <text x="81" y="349" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#1A6B7A" font-weight="600">git diff</text>
+        <text x="124" y="349" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="136" y="336" width="110" height="18" rx="4" fill="#1A6B7A" opacity="0.08"/>
+        <text x="191" y="349" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#1A6B7A" font-weight="600">parse modules</text>
+        <text x="253" y="349" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="265" y="336" width="120" height="18" rx="4" fill="#1A6B7A" opacity="0.08"/>
+        <text x="325" y="349" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#1A6B7A" font-weight="600">compare versions</text>
+        <text x="392" y="349" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="404" y="336" width="155" height="18" rx="4" fill="#1A6B7A" opacity="0.1"/>
+        <text x="481" y="349" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#1A6B7A" font-weight="700">label PR: patch|minor|major</text>
+        <g style="cursor:pointer" onclick="toggleJobDetail(1)"><text x="707" y="290" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+      </g>
+
+      <!-- JOB 2 DETAIL -->
+      <g id="job2-detail" visibility="hidden">
+        <g filter="url(#pipe-shadow)"><rect x="25" y="265" width="700" height="110" rx="8" fill="white" stroke="#B87333" stroke-width="1.5"/></g>
+        <rect x="25" y="265" width="700" height="4" rx="2" fill="#B87333"/>
+        <text x="45" y="290" font-family="JetBrains Mono,monospace" font-size="11" fill="#B87333" letter-spacing="1.5" font-weight="700">JOB 2: TERRAFORM VALIDATION</text>
+        <text x="45" y="310" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Runs: fmt &#8594; init &#8594; validate &#8594; tflint &#8594; plan -detailed-exitcode</text>
+        <rect x="45" y="322" width="50" height="18" rx="4" fill="#B87333" opacity="0.08"/>
+        <text x="70" y="335" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#B87333" font-weight="600">fmt</text>
+        <text x="101" y="335" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="113" y="322" width="50" height="18" rx="4" fill="#B87333" opacity="0.08"/>
+        <text x="138" y="335" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#B87333" font-weight="600">init</text>
+        <text x="169" y="335" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="181" y="322" width="70" height="18" rx="4" fill="#B87333" opacity="0.08"/>
+        <text x="216" y="335" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#B87333" font-weight="600">validate</text>
+        <text x="257" y="335" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="269" y="322" width="54" height="18" rx="4" fill="#B87333" opacity="0.08"/>
+        <text x="296" y="335" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#B87333" font-weight="600">tflint</text>
+        <text x="329" y="335" font-size="11" fill="#8A8A8A">&#8594;</text>
+        <rect x="341" y="322" width="105" height="18" rx="4" fill="#B87333" opacity="0.1"/>
+        <text x="393" y="335" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#B87333" font-weight="700">plan -detailed</text>
+        <text x="45" y="362" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A">Exit 0: No changes -- plan clean</text>
+        <text x="280" y="362" font-family="JetBrains Mono,monospace" font-size="10" fill="#C4283A">Exit 1: Plan failed -- breaking (skip Job 3)</text>
+        <text x="560" y="362" font-family="JetBrains Mono,monospace" font-size="10" fill="#2D7A4F">Exit 2: Changes &#8594; Job 3</text>
+        <g style="cursor:pointer" onclick="toggleJobDetail(2)"><text x="707" y="290" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+      </g>
+
+      <!-- JOB 3 DETAIL -->
+      <g id="job3-detail" visibility="hidden">
+        <g filter="url(#pipe-shadow)"><rect x="25" y="265" width="700" height="115" rx="8" fill="white" stroke="#6B3FA0" stroke-width="1.5"/></g>
+        <rect x="25" y="265" width="700" height="4" rx="2" fill="#6B3FA0"/>
+        <text x="45" y="290" font-family="JetBrains Mono,monospace" font-size="11" fill="#6B3FA0" letter-spacing="1.5" font-weight="700">JOB 3: DETERMINISTIC RISK ASSESSMENT (no AI)</text>
+        <text x="45" y="310" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Reads plan summary from Job 2 and applies the conservative decision matrix:</text>
+        <text x="45" y="326" font-family="Source Sans 3,sans-serif" font-size="11" fill="#6B6B6B">&#8226; DESTROY/REPLACE detected &#8594; always breaking-change (merge blocked)</text>
+        <text x="45" y="340" font-family="Source Sans 3,sans-serif" font-size="11" fill="#6B6B6B">&#8226; No adds, no changes &#8594; auto-merge (only auto-merge path)</text>
+        <text x="45" y="354" font-family="Source Sans 3,sans-serif" font-size="11" fill="#6B6B6B">&#8226; Adds only (no changes to existing) &#8594; needs-review (low/medium)</text>
+        <text x="45" y="368" font-family="Source Sans 3,sans-serif" font-size="11" fill="#6B6B6B">&#8226; Changes to existing &#8594; needs-review (medium/high)</text>
+        <rect x="480" y="330" width="220" height="26" rx="5" fill="#6B3FA0" opacity="0.06" stroke="#6B3FA0" stroke-width="0.5"/>
+        <text x="490" y="347" font-family="JetBrains Mono,monospace" font-size="10" fill="#6B3FA0">{ decision, risk_level, rationale }</text>
+        <g style="cursor:pointer" onclick="toggleJobDetail(3)"><text x="707" y="290" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+      </g>
+
+      <!-- JOB 4 DETAIL -->
+      <g id="job4-detail" visibility="hidden">
+        <g filter="url(#pipe-shadow)"><rect x="25" y="265" width="700" height="115" rx="8" fill="white" stroke="#C4283A" stroke-width="1.5"/></g>
+        <rect x="25" y="265" width="700" height="4" rx="2" fill="#C4283A"/>
+        <text x="45" y="290" font-family="JetBrains Mono,monospace" font-size="11" fill="#C4283A" letter-spacing="1.5" font-weight="700">JOB 4: DECISION ENGINE</text>
+        <text x="45" y="310" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Reads structured JSON from Job 3 &#8594; applies labels &#8594; posts PR comment &#8594; triggers outcome</text>
+        <rect x="45" y="322" width="280" height="20" rx="5" fill="#2D7A4F" opacity="0.08" stroke="#2D7A4F" stroke-width="0.5"/>
+        <text x="55" y="336" font-family="JetBrains Mono,monospace" font-size="10" fill="#2D7A4F" font-weight="600">auto-merge &#8594; gh pr merge --squash</text>
+        <rect x="45" y="346" width="380" height="20" rx="5" fill="#9A7B2D" opacity="0.08" stroke="#9A7B2D" stroke-width="0.5"/>
+        <text x="55" y="360" font-family="JetBrains Mono,monospace" font-size="10" fill="#9A7B2D" font-weight="600">needs-review &#8594; label + request reviewers + suggest @claude</text>
+        <rect x="45" y="370" width="320" height="20" rx="5" fill="#C4283A" opacity="0.08" stroke="#C4283A" stroke-width="0.5"/>
+        <text x="55" y="384" font-family="JetBrains Mono,monospace" font-size="10" fill="#C4283A" font-weight="600">breaking-change &#8594; block merge + detailed analysis</text>
+        <g style="cursor:pointer" onclick="toggleJobDetail(4)"><text x="707" y="290" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+      </g>
+
+      <!-- ============================================ -->
+      <!-- === BELOW-JOBS GROUP ======================== -->
+      <!-- ============================================ -->
+      <g id="below-jobs">
+
+        <!-- === OUTCOMES COLUMN (right of workflow box) === -->
+
+        <!-- Faint paths: Job 4 exit to outcomes -->
+        <line x1="705" y1="195" x2="770" y2="175" stroke="#2D7A4F" stroke-width="1.5" opacity="0.12"/>
+        <line x1="705" y1="214" x2="770" y2="220" stroke="#9A7B2D" stroke-width="1.5" opacity="0.12"/>
+        <line x1="705" y1="233" x2="770" y2="265" stroke="#C4283A" stroke-width="1.5" opacity="0.12"/>
+
+
+        <!-- AUTO-MERGE outcome -->
+        <g id="outcome-auto-box" style="cursor:pointer" onclick="toggleJobDetail(5)">
+          <g filter="url(#pipe-shadow)">
+            <rect x="770" y="150" width="190" height="60" rx="10" fill="white" stroke="#2D7A4F" stroke-width="1.5"/>
+          </g>
+          <rect x="770" y="150" width="190" height="4" rx="2" fill="#2D7A4F"/>
+          <circle cx="795" cy="183" r="9" fill="#2D7A4F" opacity="0.15"/>
+          <text x="795" y="187" text-anchor="middle" font-size="12" fill="#2D7A4F" font-weight="700">&#10003;</text>
+          <text x="815" y="179" font-family="JetBrains Mono,monospace" font-size="11" fill="#2D7A4F" font-weight="700" letter-spacing="1">AUTO-MERGE</text>
+          <text x="815" y="197" font-size="11" fill="#6B6B6B">Squash merge, risk:low</text>
+          <text x="945" y="168" font-size="9" fill="#2D7A4F" opacity="0.5">&#9660;</text>
+        </g>
+
+        <!-- NEEDS-REVIEW outcome -->
+        <g id="outcome-review-box" style="cursor:pointer" onclick="toggleJobDetail(6)">
+          <g filter="url(#pipe-shadow)">
+            <rect x="770" y="220" width="190" height="60" rx="10" fill="white" stroke="#9A7B2D" stroke-width="1.5"/>
+          </g>
+          <rect x="770" y="220" width="190" height="4" rx="2" fill="#9A7B2D"/>
+          <circle cx="795" cy="253" r="9" fill="#9A7B2D" opacity="0.15"/>
+          <text x="795" y="258" text-anchor="middle" font-size="12" fill="#9A7B2D" font-weight="700">!</text>
+          <text x="815" y="249" font-family="JetBrains Mono,monospace" font-size="11" fill="#9A7B2D" font-weight="700" letter-spacing="1">NEEDS-REVIEW</text>
+          <text x="815" y="267" font-size="11" fill="#6B6B6B">@claude + reviewers</text>
+          <text x="945" y="238" font-size="9" fill="#9A7B2D" opacity="0.5">&#9660;</text>
+        </g>
+
+        <!-- BREAKING-CHANGE outcome -->
+        <g id="outcome-break-box" style="cursor:pointer" onclick="toggleJobDetail(7)">
+          <g filter="url(#pipe-shadow)">
+            <rect x="770" y="290" width="190" height="60" rx="10" fill="white" stroke="#C4283A" stroke-width="1.5"/>
+          </g>
+          <rect x="770" y="290" width="190" height="4" rx="2" fill="#C4283A"/>
+          <circle cx="795" cy="323" r="9" fill="#C4283A" opacity="0.15"/>
+          <text x="795" y="328" text-anchor="middle" font-size="12" fill="#C4283A" font-weight="700">&#10007;</text>
+          <text x="815" y="318" font-family="JetBrains Mono,monospace" font-size="10" fill="#C4283A" font-weight="700" letter-spacing="0.5">BREAKING-CHANGE</text>
+          <text x="815" y="337" font-size="11" fill="#6B6B6B">Block + analysis</text>
+          <text x="945" y="308" font-size="9" fill="#C4283A" opacity="0.5">&#9660;</text>
+        </g>
+
+        <!-- OUTCOME DETAIL PANELS -->
+
+        <!-- Auto-Merge Detail -->
+        <g id="job5-detail" visibility="hidden">
+          <g filter="url(#pipe-shadow)"><rect x="770" y="365" width="400" height="95" rx="8" fill="white" stroke="#2D7A4F" stroke-width="1.5"/></g>
+          <rect x="770" y="365" width="400" height="4" rx="2" fill="#2D7A4F"/>
+          <text x="790" y="390" font-family="JetBrains Mono,monospace" font-size="11" fill="#2D7A4F" letter-spacing="1.5" font-weight="700">AUTO-MERGE (risk:low)</text>
+          <text x="790" y="410" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Only triggered when plan shows zero changes.</text>
+          <text x="790" y="428" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Squash-merges automatically. No human needed.</text>
+          <text x="790" y="448" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A">exit 0 &#8594; gh pr merge --squash &#8594; apply.yml</text>
+          <g style="cursor:pointer" onclick="toggleJobDetail(5)"><text x="1152" y="390" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+        </g>
+
+        <!-- Needs-Review Detail -->
+        <g id="job6-detail" visibility="hidden">
+          <g filter="url(#pipe-shadow)"><rect x="770" y="365" width="400" height="110" rx="8" fill="white" stroke="#9A7B2D" stroke-width="1.5"/></g>
+          <rect x="770" y="365" width="400" height="4" rx="2" fill="#9A7B2D"/>
+          <text x="790" y="390" font-family="JetBrains Mono,monospace" font-size="11" fill="#9A7B2D" letter-spacing="1.5" font-weight="700">NEEDS-REVIEW (risk:low to high)</text>
+          <text x="790" y="410" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Adds only = low risk (medium for major).</text>
+          <text x="790" y="428" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Changes to existing = medium (high for major).</text>
+          <text x="790" y="446" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Comment @claude to fix code. Pipeline re-runs.</text>
+          <text x="790" y="464" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A">exit 2 &#8594; needs-review &#8594; @claude available</text>
+          <g style="cursor:pointer" onclick="toggleJobDetail(6)"><text x="1152" y="390" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+        </g>
+
+        <!-- Breaking-Change Detail -->
+        <g id="job7-detail" visibility="hidden">
+          <g filter="url(#pipe-shadow)"><rect x="770" y="365" width="400" height="110" rx="8" fill="white" stroke="#C4283A" stroke-width="1.5"/></g>
+          <rect x="770" y="365" width="400" height="4" rx="2" fill="#C4283A"/>
+          <text x="790" y="390" font-family="JetBrains Mono,monospace" font-size="11" fill="#C4283A" letter-spacing="1.5" font-weight="700">BREAKING-CHANGE (risk:high/critical)</text>
+          <text x="790" y="410" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">DESTROY/REPLACE in plan, or plan failed (exit 1).</text>
+          <text x="790" y="428" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Merge blocked. Analysis posted as PR comment.</text>
+          <text x="790" y="446" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Comment @claude to diagnose and push fixes.</text>
+          <text x="790" y="464" font-family="JetBrains Mono,monospace" font-size="10" fill="#8A8A8A">destroy/replace or exit 1 &#8594; merge blocked</text>
+          <g style="cursor:pointer" onclick="toggleJobDetail(7)"><text x="1152" y="390" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+        </g>
+
+        <!-- === ON MERGE COLUMN === -->
+
+        <!-- Arrow: auto-merge to On Merge -->
+        <line x1="960" y1="180" x2="995" y2="225" stroke="#2D7A4F" stroke-width="1.5" opacity="0.12"/>
+        <polygon points="993,222 998,227 992,228" fill="#2D7A4F" opacity="0.25"/>
+
+        <!-- ON MERGE box -->
+        <g id="onmerge-box" style="cursor:pointer" onclick="toggleJobDetail(8)">
+          <g filter="url(#pipe-shadow)">
+            <rect x="995" y="150" width="180" height="210" rx="10" fill="white" stroke="#2D7A4F" stroke-width="1.5"/>
+          </g>
+          <rect x="995" y="150" width="180" height="4" rx="2" fill="#2D7A4F"/>
+          <text x="1085" y="178" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#2D7A4F" letter-spacing="2.5" font-weight="700">ON MERGE</text>
+          <text x="1085" y="200" text-anchor="middle" font-family="Playfair Display,serif" font-size="16" fill="#1A1A1A" font-weight="700">terraform</text>
+          <text x="1085" y="218" text-anchor="middle" font-family="Playfair Display,serif" font-size="16" fill="#1A1A1A" font-weight="700">-apply.yml</text>
+
+          <!-- Success path -->
+          <rect x="1008" y="232" width="154" height="26" rx="5" fill="#2D7A4F" opacity="0.06" stroke="#2D7A4F" stroke-width="0.5"/>
+          <text x="1018" y="249" font-family="JetBrains Mono,monospace" font-size="9" fill="#2D7A4F" font-weight="600">SUCCESS</text>
+          <text x="1018" y="254" font-family="JetBrains Mono,monospace" font-size="7" fill="#2D7A4F">config &#8594; run &#8594; apply</text>
+
+          <!-- Failure path -->
+          <rect x="1008" y="264" width="154" height="26" rx="5" fill="#C4283A" opacity="0.06" stroke="#C4283A" stroke-width="0.5"/>
+          <text x="1018" y="281" font-family="JetBrains Mono,monospace" font-size="9" fill="#C4283A" font-weight="600">FAILURE</text>
+          <text x="1018" y="286" font-family="JetBrains Mono,monospace" font-size="7" fill="#C4283A">incident + rollback PR</text>
+
+          <!-- Rollback note -->
+          <text x="1085" y="312" text-anchor="middle" font-family="Source Sans 3,sans-serif" font-size="10" fill="#8A8A8A">Rollback PR goes through</text>
+          <text x="1085" y="326" text-anchor="middle" font-family="Source Sans 3,sans-serif" font-size="10" fill="#8A8A8A">the normal pipeline for</text>
+          <text x="1085" y="340" text-anchor="middle" font-family="Source Sans 3,sans-serif" font-size="10" fill="#8A8A8A">safe revert (D6)</text>
+          <text x="1160" y="168" font-size="9" fill="#2D7A4F" opacity="0.5">&#9660;</text>
+        </g>
+
+        <!-- On Merge Detail -->
+        <g id="job8-detail" visibility="hidden">
+          <g filter="url(#pipe-shadow)"><rect x="770" y="365" width="400" height="115" rx="8" fill="white" stroke="#2D7A4F" stroke-width="1.5"/></g>
+          <rect x="770" y="365" width="400" height="4" rx="2" fill="#2D7A4F"/>
+          <text x="790" y="390" font-family="JetBrains Mono,monospace" font-size="11" fill="#2D7A4F" letter-spacing="1.5" font-weight="700">ON MERGE: terraform-apply.yml</text>
+          <text x="790" y="410" font-family="Source Sans 3,sans-serif" font-size="12" fill="#3D3D3D">Separate workflow triggered when PR merges to main.</text>
+          <rect x="790" y="420" width="355" height="20" rx="5" fill="#2D7A4F" opacity="0.06" stroke="#2D7A4F" stroke-width="0.5"/>
+          <text x="800" y="434" font-family="JetBrains Mono,monospace" font-size="10" fill="#2D7A4F" font-weight="600">SUCCESS: upload &#8594; create run &#8594; apply &#8594; comment</text>
+          <rect x="790" y="444" width="360" height="20" rx="5" fill="#C4283A" opacity="0.06" stroke="#C4283A" stroke-width="0.5"/>
+          <text x="800" y="458" font-family="JetBrains Mono,monospace" font-size="10" fill="#C4283A" font-weight="600">FAILURE: incident issue &#8594; rollback PR &#8594; CODEOWNERS</text>
+          <text x="790" y="475" font-family="Source Sans 3,sans-serif" font-size="10" fill="#8A8A8A">Rollback PR goes through the normal pipeline for safe revert.</text>
+          <g style="cursor:pointer" onclick="toggleJobDetail(8)"><text x="1152" y="390" text-anchor="middle" font-size="14" fill="#8A8A8A">&#10005;</text></g>
+        </g>
+
+      </g>
+
+      <!-- Single animated flow ball (JS-driven) -->
+      <circle id="flow-ball" r="5" fill="#4A6B8A" filter="url(#glow-ice)" opacity="0"/>
+      <circle id="flow-trail" r="3" fill="#4A6B8A" opacity="0"/>
+
+    </svg>
+
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#4A6B8A"></div> Dependabot</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1A6B7A"></div> Classify</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#B87333"></div> Validate</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#6B3FA0"></div> Risk Assessment</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#C4283A"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#9A7B2D"></div> Outcomes / Claude Review</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#2D7A4F"></div> Apply</div>
+  </div>
+  <p style="font-size:12px; color:#8A8A8A; text-align:center; margin-top:8px; font-style:italic">Click any box to expand details</p>
+</div>
+
+<!-- ===== ESCALATION FLOW ===== -->
+<div class="chapter-divider" id="escalation-section" data-section="escalation-section">
+  <div class="chapter-number">Escalation</div>
+  <h2 class="chapter-title">The @claude Fix Loop</h2>
+  <p class="chapter-subtitle">When the pipeline labels a PR as needs-review or breaking-change, comment <code>@claude</code> to have it fix the consumer code and push -- the pipeline then re-runs automatically</p>
+</div>
+
+<div class="subsection" id="escalation-risk-levels" data-sub="Risk Levels">
+  <div class="card-grid">
+    <details class="ed-card" style="border-top: 3px solid var(--green)">
+      <summary>
+        <h3>Low Risk: Auto-Merge</h3>
+        <p>No adds, no changes. Plan shows zero infrastructure changes (exit 0). Pipeline auto-merges with squash. No human intervention needed.</p>
+        <div class="node-row" style="margin-top:8px">
+          <span class="node node-script">risk:low</span>
+          <span class="node node-script">auto-merge</span>
+        </div>
+      </summary>
+      <div class="card-expand">
+        <p>This is the only auto-merge path. The module version bump was applied but resulted in zero infrastructure changes -- no new resources added and no existing resources modified. This applies equally to patch, minor, and major bumps.</p>
+        <ul>
+          <li>Plan exit code: <code>0</code> (success, no changes)</li>
+          <li>Action: squash merge + <code>risk:low</code> label</li>
+          <li>No reviewer requested</li>
+        </ul>
+      </div>
+    </details>
+    <details class="ed-card" style="border-top: 3px solid var(--green)">
+      <summary>
+        <h3>Low Risk: Adds Only (Needs Review)</h3>
+        <p>New resources added but no existing resources modified. Low risk since nothing existing is touched, but requires review to confirm new resources are expected.</p>
+        <div class="node-row" style="margin-top:8px">
+          <span class="node node-script">risk:low</span>
+          <span class="node node-template">needs-review</span>
+        </div>
+      </summary>
+      <div class="card-expand">
+        <p>New resources will be created but no existing resources are changed, destroyed, or replaced. This is low risk for patch/minor bumps. For major bumps, risk escalates to <code>risk:medium</code> because major version changes are more likely to introduce unexpected behavior.</p>
+        <ul>
+          <li>Plan exit code: <code>2</code> (changes detected, adds only)</li>
+          <li>Action: <code>needs-review</code> label + request reviewer</li>
+          <li>Optional: comment <code>@claude</code> to investigate</li>
+        </ul>
+      </div>
+    </details>
+    <details class="ed-card" style="border-top: 3px solid var(--yellow)">
+      <summary>
+        <h3>Medium Risk: Changes to Existing</h3>
+        <p>Existing resources will be modified (with or without adds). Higher risk because changes affect running workloads. Comment <code>@claude</code> to investigate and reduce blast radius.</p>
+        <div class="node-row" style="margin-top:8px">
+          <span class="node node-mcp">risk:medium</span>
+          <span class="node node-template">needs-review</span>
+        </div>
+      </summary>
+      <div class="card-expand">
+        <p>Plan modifies existing resources -- this affects running workloads and carries higher risk than adds-only. For patch/minor bumps this is <code>risk:medium</code>; for major bumps it escalates to <code>risk:high</code>.</p>
+        <ul>
+          <li>Plan exit code: <code>2</code> (changes to existing resources)</li>
+          <li>Action: <code>needs-review</code> label + request reviewer</li>
+          <li>Recommended: comment <code>@claude</code> to investigate</li>
+        </ul>
+      </div>
+    </details>
+    <details class="ed-card" style="border-top: 3px solid var(--orange)">
+      <summary>
+        <h3>High Risk: DESTROY/REPLACE</h3>
+        <p>Plan contains resource destruction or replacement. Always classified as breaking-change regardless of semver type. Merge blocked. Comment <code>@claude</code> to fix consumer code.</p>
+        <div class="node-row" style="margin-top:8px">
+          <span class="node node-artifact">risk:high</span>
+          <span class="node node-agent">@claude fix</span>
+        </div>
+      </summary>
+      <div class="card-expand">
+        <p>DESTROY/REPLACE actions are always treated as breaking changes, regardless of semver type. For patch and minor bumps this is <code>risk:high</code>; for major bumps it escalates to <code>risk:critical</code>.</p>
+        <ul>
+          <li>Plan contains <code>destroy</code> or <code>replace</code> actions</li>
+          <li>Action: <code>breaking-change</code> label + merge blocked</li>
+          <li>Recommended: comment <code>@claude</code> to adapt config</li>
+        </ul>
+      </div>
+    </details>
+    <details class="ed-card" style="border-top: 3px solid var(--red)">
+      <summary>
+        <h3>Critical: Plan Failed</h3>
+        <p>Plan failed (exit 1). The module version bump introduces changes that prevent Terraform from planning. Merge blocked. Comment <code>@claude</code> to diagnose and fix.</p>
+        <div class="node-row" style="margin-top:8px">
+          <span class="node node-cmd">risk:critical</span>
+          <span class="node node-cmd">breaking-change</span>
+        </div>
+      </summary>
+      <div class="card-expand">
+        <p>Plan failure means the module interface changed in a way that breaks the consumer code. For patch and minor bumps this is <code>risk:high</code>; for major bumps it escalates to <code>risk:critical</code>.</p>
+        <ul>
+          <li>Plan exit code: <code>1</code> (error)</li>
+          <li>Action: <code>breaking-change</code> label + merge blocked</li>
+          <li>Comment <code>@claude</code> to diagnose, fix, and push</li>
+          <li>Pipeline re-validates automatically after fix</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+
+  <div class="subsection-title" style="margin-top:16px">How @claude Interactive Works</div>
+  <div class="subsection-desc">Two workflow files coordinate: the uplift pipeline posts a review comment, and the Claude Review workflow handles the interactive fix loop</div>
+
+  <details class="ed-card">
+    <summary>
+      <h3>Two Workflows, One Pipeline</h3>
+      <p>The pipeline uses two separate workflow files. <code>terraform-consumer-uplift.yml</code> handles the deterministic pipeline (Jobs 1-4) on <code>pull_request</code> events. <code>terraform-claude-review.yml</code> handles interactive <code>@claude</code> review on <code>issue_comment</code> events.</p>
+    </summary>
+    <div class="card-expand">
+      <p><strong>Workflow 1: <code>terraform-consumer-uplift.yml</code></strong> runs the four deterministic jobs (Classify, Validate, Risk Assess, Decision) on PR <code>opened</code> and <code>synchronize</code> events. The Decision job (Job 4) auto-posts an <code>@claude review</code> comment on the PR when the outcome is <code>needs-review</code> or <code>breaking-change</code>.</p>
+      <p><strong>Workflow 2: <code>terraform-claude-review.yml</code></strong> triggers on <code>issue_comment</code> events when <code>@claude</code> is mentioned. It includes a gate job that prevents bot comments (including its own) from cancelling in-progress reviews. Claude checks out the PR branch, uses MCP tools to investigate module interface changes, fixes consumer code, and pushes.</p>
+      <p>When <code>@claude</code> pushes code fixes, the <code>synchronize</code> event re-triggers the uplift pipeline (Workflow 1) automatically. This creates a feedback loop:</p>
+      <ul>
+        <li>Decision job (Workflow 1) posts <code>@claude review</code> comment on the PR</li>
+        <li>Claude Review workflow (Workflow 2) triggers on the comment</li>
+        <li>Gate job filters out bot comments to prevent cancellation loops</li>
+        <li>Claude diagnoses, fixes consumer code, and pushes</li>
+        <li>Push triggers <code>synchronize</code> event on the PR</li>
+        <li>Uplift pipeline (Workflow 1) re-runs Jobs 1-4 with the fixed code</li>
+        <li>Risk re-assessed -- may now auto-merge if plan is clean</li>
+      </ul>
+      <p class="card-detail">Claude never approves or merges -- the pipeline handles that. The two-file architecture ensures <code>issue_comment</code> events only trigger the lightweight Claude review, not the full 4-job pipeline.</p>
+    </div>
+  </details>
+</div>
+
+<!-- ===== DECISION MATRIX ===== -->
+<div class="chapter-divider" id="decision-section" data-section="decision-section">
+  <div class="chapter-number">Risk Assessment</div>
+  <h2 class="chapter-title">Decision Matrix</h2>
+  <p class="chapter-subtitle">Deterministic risk classification from plan exit code, destroy/replace presence, and semver type</p>
+</div>
+
+<div class="subsection" id="decision-matrix" data-sub="Decision Matrix">
+  <table class="matrix-table">
+    <tr>
+      <th>Condition</th>
+      <th>Patch / Minor</th>
+      <th>Major</th>
+    </tr>
+    <tr>
+      <td><span title="Plan exit code 0: no infrastructure changes. The version constraint was updated but the plan is clean — no resources to add, change, or destroy.">Plan has no changes (exit 0)</span></td>
+      <td class="risk-low">AUTO-MERGE<br/>risk:low</td>
+      <td class="risk-low">AUTO-MERGE<br/>risk:low</td>
+    </tr>
+    <tr>
+      <td><span title="Plan creates new resources only. No in-place updates, replacements, or deletions to existing managed resources. Review confirms new resources are intentional.">Resources to add, none to change</span></td>
+      <td class="risk-low">NEEDS-REVIEW<br/>risk:low</td>
+      <td class="risk-med">NEEDS-REVIEW<br/>risk:medium</td>
+    </tr>
+    <tr>
+      <td><span title="Plan modifies existing managed resources, with or without new resource creation. Changes to live infrastructure carry elevated risk.">Changes to existing (with or without adds)</span></td>
+      <td class="risk-med">NEEDS-REVIEW<br/>risk:medium</td>
+      <td class="risk-high">NEEDS-REVIEW<br/>risk:high</td>
+    </tr>
+    <tr>
+      <td><span title="Plan includes destroy or replace (delete + recreate) actions. These are irreversible operations on managed infrastructure and always block the merge.">Plan includes destroy or replace</span></td>
+      <td class="risk-high">BREAKING-CHANGE<br/>risk:high</td>
+      <td class="risk-crit">BREAKING-CHANGE<br/>risk:critical</td>
+    </tr>
+    <tr>
+      <td><span title="Terraform plan exited with code 1 — configuration error. Typically caused by removed variables, changed types, or missing required inputs after a module interface change.">Plan error (exit 1)</span></td>
+      <td class="risk-high">BREAKING-CHANGE<br/>risk:high</td>
+      <td class="risk-crit">BREAKING-CHANGE<br/>risk:critical</td>
+    </tr>
+  </table>
+
+  <div class="card-grid">
+    <details class="ed-card">
+      <summary>
+        <h3>Adds vs Changes</h3>
+        <p>The matrix distinguishes between <strong>new resources</strong> (adds) and <strong>modifications to existing resources</strong> (changes). Adds-only is lower risk than changes.</p>
+      </summary>
+      <div class="card-expand">
+        <p>Adding new resources doesn't touch existing infrastructure, so it's classified as low risk with needs-review. Modifying existing resources carries higher risk (medium) because it can affect running workloads. Both always require review -- only zero-change plans auto-merge.</p>
+      </div>
+    </details>
+    <details class="ed-card">
+      <summary>
+        <h3>DESTROY/REPLACE Always Blocks</h3>
+        <p>Any resource destruction or replacement always results in a <code>breaking-change</code> classification and merge block.</p>
+      </summary>
+      <div class="card-expand">
+        <p>Resource deletion and replacement are irreversible operations. DESTROY/REPLACE is never classified as merely "needs-review" -- it always blocks the merge as a breaking change. For major bumps, it escalates to <code>risk:critical</code>.</p>
+      </div>
+    </details>
+    <details class="ed-card">
+      <summary>
+        <h3>Major Bumps Escalate</h3>
+        <p>Major version bumps escalate the risk level by one tier compared to patch/minor for the same plan outcome.</p>
+      </summary>
+      <div class="card-expand">
+        <p>A major version signals potential breaking API changes. Adds-only goes from low to medium, changes go from medium to high, and DESTROY/REPLACE goes from high to critical. Zero-change plans remain low risk even on major bumps.</p>
+      </div>
+    </details>
+    <details class="ed-card">
+      <summary>
+        <h3>Fully Deterministic</h3>
+        <p>No AI involved in the risk assessment. The matrix is applied from plan add/change/destroy counts and semver type.</p>
+      </summary>
+      <div class="card-expand">
+        <p>AI is reserved for <code>@claude</code> interactive follow-up only. The risk assessment uses a simple lookup table with five conditions checked in priority order. This ensures consistent, auditable decisions across all module upgrades.</p>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- Footer -->
+<div style="text-align:center;padding:60px 28px 40px;border-top:1px solid var(--border);max-width:var(--max-w);margin:40px auto 0">
+  <p style="font-size:11px;color:var(--text-caption)">Part of the <span style="color:var(--red);font-weight:600">HCP Terraform x AI Agents</span> SDD framework</p>
+</div>
+
+<script>
+// ============================================================
+// TOGGLE JOB DETAIL PANELS - pushes content below down
+// ============================================================
+// Detail panels for jobs 1-4 appear below the job row inside the workflow box
+// Detail panels for outcomes 5-8 appear below the outcomes column
+// Job details push below-jobs group down; outcome details extend the SVG height
+var jobDetailHeights = { 1: 110, 2: 120, 3: 125, 4: 125 };
+var outcomeDetailHeights = { 5: 105, 6: 120, 7: 120, 8: 125 };
+function toggleJobDetail(n) {
+  var svg = document.getElementById('pipeline-svg');
+  var belowGroup = document.getElementById('below-jobs');
+  var bgFill = document.getElementById('bg-fill');
+  var bgGrid = document.getElementById('bg-grid');
+  var bgBorder = document.getElementById('bg-border');
+  var baseHeight = 680;
+  var jobOffset = 0;
+  var outcomeOffset = 0;
+
+  // Close all panels, then toggle the clicked one
+  for (var i = 1; i <= 8; i++) {
+    var el = document.getElementById('job' + i + '-detail');
+    if (!el) continue;
+    if (i === n) {
+      var wasHidden = el.getAttribute('visibility') === 'hidden';
+      el.setAttribute('visibility', wasHidden ? 'visible' : 'hidden');
+      if (wasHidden) {
+        // Move to end of SVG so it renders on top of everything
+        svg.appendChild(el);
+        if (i <= 4) jobOffset = jobDetailHeights[i];
+        else outcomeOffset = outcomeDetailHeights[i];
+      }
+    } else {
+      el.setAttribute('visibility', 'hidden');
+    }
+  }
+
+  var totalExtra = Math.max(jobOffset, outcomeOffset);
+  var newHeight = baseHeight + totalExtra;
+  svg.setAttribute('viewBox', '0 0 1200 ' + newHeight);
+  [bgFill, bgGrid, bgBorder].forEach(function(r) { r.setAttribute('height', newHeight); });
+  belowGroup.style.transform = jobOffset ? 'translate(0,' + jobOffset + 'px)' : '';
+}
+
+// ============================================================
+// READING PROGRESS BAR
+// ============================================================
+function updateProgress() {
+  var h = document.documentElement.scrollHeight - window.innerHeight;
+  var pct = h > 0 ? (window.scrollY / h) * 100 : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+window.addEventListener('scroll', updateProgress);
+
+// ============================================================
+// SCROLL UTILITIES
+// ============================================================
+function scrollToSection(id) {
+  var el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function scrollToEl(id) {
+  var el = document.getElementById(id);
+  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); closeTOC(); }
+}
+
+// ============================================================
+// TOC PANEL
+// ============================================================
+function toggleTOC() { document.getElementById('toc-panel').classList.toggle('open'); }
+function closeTOC() { document.getElementById('toc-panel').classList.remove('open'); }
+
+function buildTOC() {
+  var tocContent = document.getElementById('toc-content');
+  var sections = document.querySelectorAll('.chapter-divider');
+  var html = '';
+  sections.forEach(function(sec) {
+    var id = sec.id;
+    var titleEl = sec.querySelector('.chapter-title');
+    if (!titleEl) return;
+    var title = titleEl.textContent;
+    html += '<div class="toc-section"><div class="toc-section-title">' + title + '</div>';
+    // Find subsections following this chapter divider
+    var el = sec.nextElementSibling;
+    while (el && !el.classList.contains('chapter-divider')) {
+      if (el.classList.contains('subsection') && el.dataset.sub) {
+        html += '<a class="toc-link" data-toc-id="' + el.id + '" onclick="scrollToEl(\'' + el.id + '\')">' + el.dataset.sub + '</a>';
+      }
+      el = el.nextElementSibling;
+    }
+    html += '</div>';
+  });
+  tocContent.innerHTML = html;
+}
+
+// ============================================================
+// SEARCH OVERLAY
+// ============================================================
+var searchOverlay = document.getElementById('search-overlay');
+var searchInput = document.getElementById('search-input');
+var searchResults = document.getElementById('search-results');
+var searchIdx = -1;
+
+// Searchable items: sections and components
+var searchItems = [
+  { id: 'landing', type: 'section', name: 'Overview', desc: 'Automated module version upgrades for HCP Terraform consumers' },
+  { id: 'pipeline-section', type: 'section', name: 'Connected Pipeline', desc: 'Two workflows in one pipeline: uplift (Jobs 1-4) and Claude Review (@claude follow-up)' },
+  { id: 'pipeline-diagram', type: 'component', name: 'Pipeline Diagram', desc: 'Animated SVG showing Jobs 1-4 flow with Dependabot trigger' },
+  { id: 'escalation-section', type: 'section', name: 'Escalation', desc: 'The @claude fix loop for needs-review and breaking-change PRs' },
+  { id: 'escalation-risk-levels', type: 'component', name: 'Risk Levels', desc: 'Low, medium, high, and critical risk classification cards' },
+  { id: 'decision-section', type: 'section', name: 'Decision Matrix', desc: 'Deterministic risk classification from plan exit code and semver type' },
+  { id: 'decision-matrix', type: 'component', name: 'Matrix Table', desc: '5-row decision matrix: no changes, adds only, changes, destroy/replace, plan fails' },
+  // Concepts
+  { id: 'decision-section', type: 'concept', name: 'Auto-Merge', desc: 'Only zero-change plans are auto-merged. Any infrastructure change requires review.' },
+  { id: 'decision-section', type: 'concept', name: 'DESTROY/REPLACE', desc: 'Always classified as breaking-change. Merge is blocked regardless of semver type.' },
+  { id: 'escalation-section', type: 'concept', name: '@claude Fix Loop', desc: 'Comment @claude to fix consumer code. Pipeline re-validates after push.' }
+];
+
+var typeColors = {
+  section: '#C4283A', component: '#1A6B7A', concept: '#6B3FA0',
+  script: '#2D7A4F', workflow: '#B87333', agent: '#C4283A'
+};
+var typeLabels = {
+  section: 'Section', component: 'Component', concept: 'Concept',
+  script: 'Script', workflow: 'Workflow', agent: 'Agent'
+};
+
+function openSearch() {
+  searchOverlay.classList.add('open');
+  searchInput.value = ''; searchInput.focus();
+  renderSearchResults('');
+}
+function closeSearch() { searchOverlay.classList.remove('open'); searchIdx = -1; }
+
+function renderSearchResults(query) {
+  var q = query.toLowerCase().trim();
+  if (!q) { searchResults.innerHTML = '<div class="search-empty">Type to search sections, components, concepts...</div>'; return; }
+  var results = [];
+  searchItems.forEach(function(item) {
+    if (item.name.toLowerCase().indexOf(q) !== -1 || item.desc.toLowerCase().indexOf(q) !== -1 || item.type.toLowerCase().indexOf(q) !== -1) {
+      results.push(item);
+    }
+  });
+  if (!results.length) { searchResults.innerHTML = '<div class="search-empty">No results found</div>'; return; }
+  searchResults.innerHTML = results.slice(0, 15).map(function(r, i) {
+    var c = typeColors[r.type] || '#888';
+    return '<div class="search-result' + (i === searchIdx ? ' selected' : '') + '" data-search-id="' + r.id + '"><span class="sr-type" style="color:' + c + ';border-color:' + c + '">' + (typeLabels[r.type] || r.type) + '</span><div><div class="sr-name" style="color:' + c + '">' + r.name + '</div><div class="sr-desc">' + r.desc + '</div></div></div>';
+  }).join('');
+  searchResults.querySelectorAll('.search-result').forEach(function(el) {
+    el.addEventListener('click', function() {
+      closeSearch();
+      var target = document.getElementById(el.dataset.searchId);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+
+searchInput.addEventListener('input', function() { searchIdx = -1; renderSearchResults(searchInput.value); });
+searchInput.addEventListener('keydown', function(e) {
+  var items = searchResults.querySelectorAll('.search-result');
+  if (e.key === 'ArrowDown') { e.preventDefault(); searchIdx = Math.min(searchIdx + 1, items.length - 1); renderSearchResults(searchInput.value); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); searchIdx = Math.max(searchIdx - 1, 0); renderSearchResults(searchInput.value); }
+  else if (e.key === 'Enter' && items[searchIdx]) items[searchIdx].click();
+});
+searchOverlay.addEventListener('click', function(e) { if (e.target === searchOverlay) closeSearch(); });
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeSearch(); closeTOC(); }
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); openSearch(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
+});
+
+// ============================================================
+// INTERSECTION OBSERVER: Fade reveals + TOC highlighting + Header nav
+// ============================================================
+var revealObserver = new IntersectionObserver(function(entries) {
+  entries.forEach(function(e) { if (e.isIntersecting) e.target.classList.add('revealed'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.subsection').forEach(function(s) { revealObserver.observe(s); });
+
+var tocObserver = new IntersectionObserver(function(entries) {
+  entries.forEach(function(e) {
+    var link = document.querySelector('.toc-link[data-toc-id="' + e.target.id + '"]');
+    if (link) {
+      if (e.isIntersecting) link.classList.add('active');
+      else link.classList.remove('active');
+    }
+  });
+  // Update header nav active state
+  entries.forEach(function(e) {
+    if (e.isIntersecting) {
+      var sec = e.target.closest('[data-section]');
+      if (!sec) sec = e.target;
+      if (sec && sec.dataset.section) {
+        document.querySelectorAll('.header-link').forEach(function(l) { l.classList.remove('active'); });
+        var btn = document.querySelector('.header-link[onclick*="' + sec.dataset.section + '"]');
+        if (btn) btn.classList.add('active');
+      }
+    }
+  });
+}, { threshold: 0.2, rootMargin: '-50px 0px -50% 0px' });
+document.querySelectorAll('.subsection, .chapter-divider[data-section], #landing').forEach(function(s) { tocObserver.observe(s); });
+
+// ============================================================
+// ANIMATED FLOW BALL — Catmull-Rom spline for smooth curves
+// ============================================================
+(function() {
+  var ball = document.getElementById('flow-ball');
+  var trail = document.getElementById('flow-trail');
+  var svgEl = document.getElementById('pipeline-svg');
+  if (!ball || !trail || !svgEl) return;
+
+  var filters = {
+    '#4A6B8A': 'url(#glow-ice)',
+    '#1A6B7A': 'url(#glow-teal)',
+    '#B87333': 'url(#glow-orange)',
+    '#6B3FA0': 'url(#glow-purple)',
+    '#C4283A': 'url(#glow-red)',
+    '#2D7A4F': 'url(#glow-green)',
+    '#9A7B2D': 'url(#glow-yellow)'
+  };
+
+  // Waypoints: [x, y, color, pauseMs]
+  var baseWaypoints = [
+    [375, 80,  '#4A6B8A', 0],
+    [375, 140, '#4A6B8A', 0],
+    [122, 214, '#1A6B7A', 180],
+    [200, 214, '#1A6B7A', 0],
+    [297, 214, '#B87333', 180],
+    [375, 214, '#B87333', 0],
+    [472, 214, '#6B3FA0', 180],
+    [550, 214, '#6B3FA0', 0],
+    [637, 214, '#C4283A', 180],
+    [705, 214, '#C4283A', 0]
+  ];
+
+  var outcomePaths = [
+    // Auto-Merge -> On Merge
+    [
+      [770, 175, '#2D7A4F', 120],
+      [865, 175, '#2D7A4F', 100],
+      [960, 180, '#2D7A4F', 0],
+      [1085, 225, '#2D7A4F', 250]
+    ],
+    // Needs-Review
+    [
+      [770, 250, '#9A7B2D', 120],
+      [865, 250, '#9A7B2D', 250]
+    ],
+    // Breaking-Change
+    [
+      [770, 320, '#C4283A', 120],
+      [865, 320, '#C4283A', 250]
+    ],
+    // Needs-Review -> Claude Review -> feedback loop
+    [
+      [770, 250, '#9A7B2D', 120],
+      [865, 250, '#9A7B2D', 140],
+      [520, 440, '#9A7B2D', 0],
+      [195, 513, '#9A7B2D', 140],
+      [382, 513, '#9A7B2D', 200],
+      [475, 513, '#9A7B2D', 0],
+      [570, 430, '#1A6B7A', 0],
+      [375, 390, '#1A6B7A', 0],
+      [375, 140, '#1A6B7A', 0],
+      [122, 214, '#1A6B7A', 180]
+    ]
+  ];
+
+  // --- Catmull-Rom spline helpers ---
+  // Returns point on a Catmull-Rom segment between p1 and p2
+  // with control points p0 and p3, at parameter t in [0,1]
+  function catmullRom(p0, p1, p2, p3, t, alpha) {
+    if (alpha === undefined) alpha = 0.5; // centripetal
+    function dist2(a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1];
+      return dx * dx + dy * dy;
+    }
+    var d01 = Math.pow(dist2(p0, p1), alpha * 0.5);
+    var d12 = Math.pow(dist2(p1, p2), alpha * 0.5);
+    var d23 = Math.pow(dist2(p2, p3), alpha * 0.5);
+    if (d01 < 1e-4) d01 = 1;
+    if (d12 < 1e-4) d12 = 1;
+    if (d23 < 1e-4) d23 = 1;
+
+    var b1x = (d01 * d01 * p2[0] - d12 * d12 * p0[0] + (2 * d01 * d01 + 3 * d01 * d12 + d12 * d12) * p1[0]) / (3 * d01 * (d01 + d12));
+    var b1y = (d01 * d01 * p2[1] - d12 * d12 * p0[1] + (2 * d01 * d01 + 3 * d01 * d12 + d12 * d12) * p1[1]) / (3 * d01 * (d01 + d12));
+    var b2x = (d23 * d23 * p1[0] - d12 * d12 * p3[0] + (2 * d23 * d23 + 3 * d23 * d12 + d12 * d12) * p2[0]) / (3 * d23 * (d23 + d12));
+    var b2y = (d23 * d23 * p1[1] - d12 * d12 * p3[1] + (2 * d23 * d23 + 3 * d23 * d12 + d12 * d12) * p2[1]) / (3 * d23 * (d23 + d12));
+
+    var t2 = t * t, t3 = t2 * t;
+    var mt = 1 - t, mt2 = mt * mt, mt3 = mt2 * mt;
+    return [
+      mt3 * p1[0] + 3 * mt2 * t * b1x + 3 * mt * t2 * b2x + t3 * p2[0],
+      mt3 * p1[1] + 3 * mt2 * t * b1y + 3 * mt * t2 * b2y + t3 * p2[1]
+    ];
+  }
+
+  // Build a dense array of {x, y, color} samples from waypoints using Catmull-Rom
+  function buildSplinePath(waypoints) {
+    var samples = [];
+    var samplesPerSeg = 40; // more samples = smoother
+    var n = waypoints.length;
+    if (n < 2) return samples;
+
+    for (var i = 0; i < n - 1; i++) {
+      var p0 = waypoints[Math.max(0, i - 1)];
+      var p1 = waypoints[i];
+      var p2 = waypoints[i + 1];
+      var p3 = waypoints[Math.min(n - 1, i + 2)];
+
+      for (var s = 0; s < samplesPerSeg; s++) {
+        var t = s / samplesPerSeg;
+        var pt = catmullRom(p0, p1, p2, p3, t);
+        // Color: blend from p1 color to p2 color
+        var col = t < 0.5 ? p1[2] : p2[2];
+        samples.push({ x: pt[0], y: pt[1], color: col });
+      }
+    }
+    // Add final point
+    var last = waypoints[n - 1];
+    samples.push({ x: last[0], y: last[1], color: last[2] });
+
+    return samples;
+  }
+
+  // Compute cumulative arc-length for uniform-speed traversal
+  function computeArcLengths(samples) {
+    var lengths = [0];
+    for (var i = 1; i < samples.length; i++) {
+      var dx = samples[i].x - samples[i - 1].x;
+      var dy = samples[i].y - samples[i - 1].y;
+      lengths.push(lengths[i - 1] + Math.sqrt(dx * dx + dy * dy));
+    }
+    return lengths;
+  }
+
+  // Given a distance along the path, return interpolated {x, y, color}
+  function sampleAtDistance(samples, arcLengths, d) {
+    var total = arcLengths[arcLengths.length - 1];
+    if (d <= 0) return samples[0];
+    if (d >= total) return samples[samples.length - 1];
+    // Binary search for segment
+    var lo = 0, hi = arcLengths.length - 1;
+    while (lo < hi - 1) {
+      var mid = (lo + hi) >> 1;
+      if (arcLengths[mid] < d) lo = mid; else hi = mid;
+    }
+    var segLen = arcLengths[hi] - arcLengths[lo];
+    var t = segLen > 0 ? (d - arcLengths[lo]) / segLen : 0;
+    return {
+      x: samples[lo].x + (samples[hi].x - samples[lo].x) * t,
+      y: samples[lo].y + (samples[hi].y - samples[lo].y) * t,
+      color: t < 0.5 ? samples[lo].color : samples[hi].color
+    };
+  }
+
+  // Build pause schedule: at each waypoint with pauseMs > 0,
+  // record what distance along the spline it corresponds to
+  function buildPauseSchedule(waypoints, samples, arcLengths) {
+    var schedule = [];
+    var sampleIdx = 0;
+    var samplesPerSeg = 40;
+    for (var i = 0; i < waypoints.length; i++) {
+      var wpDist;
+      if (i === 0) {
+        wpDist = 0;
+      } else if (i === waypoints.length - 1) {
+        wpDist = arcLengths[arcLengths.length - 1];
+      } else {
+        // Waypoint i corresponds to sample index i * samplesPerSeg
+        var si = Math.min(i * samplesPerSeg, arcLengths.length - 1);
+        wpDist = arcLengths[si];
+      }
+      if (waypoints[i][3] > 0) {
+        schedule.push({ dist: wpDist, duration: waypoints[i][3] });
+      }
+    }
+    return schedule;
+  }
+
+  var speed = 0.30; // px per ms
+  var splineSamples = [];
+  var arcLengths = [];
+  var totalLength = 0;
+  var pauseSchedule = [];
+  var currentDist = 0;
+  var currentPause = -1; // index into pauseSchedule, -1 = not pausing
+  var pauseElapsed = 0;
+  var fadeState = 'in';
+  var fadeT = 0;
+  var waitUntil = 0;
+  var lastTs = 0;
+  var trailX = 0, trailY = 0;
+  var currentWaypoints = [];
+
+  function buildPath() {
+    var p = baseWaypoints.slice();
+    var fork = outcomePaths[Math.floor(Math.random() * outcomePaths.length)];
+    p = p.concat(fork);
+    return p;
+  }
+
+  function startCycle() {
+    currentWaypoints = buildPath();
+    splineSamples = buildSplinePath(currentWaypoints);
+    arcLengths = computeArcLengths(splineSamples);
+    totalLength = arcLengths[arcLengths.length - 1];
+    pauseSchedule = buildPauseSchedule(currentWaypoints, splineSamples, arcLengths);
+    currentDist = 0;
+    currentPause = -1;
+    pauseElapsed = 0;
+    fadeState = 'in';
+    fadeT = 0;
+
+    var wp = currentWaypoints[0];
+    ball.setAttribute('cx', wp[0]);
+    ball.setAttribute('cy', wp[1]);
+    ball.setAttribute('r', '5');
+    ball.setAttribute('fill', wp[2]);
+    ball.setAttribute('filter', filters[wp[2]] || 'url(#glow-teal)');
+    trailX = wp[0]; trailY = wp[1];
+    trail.setAttribute('cx', wp[0]);
+    trail.setAttribute('cy', wp[1]);
+    trail.setAttribute('fill', wp[2]);
+
+    svgEl.appendChild(trail);
+    svgEl.appendChild(ball);
+  }
+
+  function tick(ts) {
+    if (!lastTs) { lastTs = ts; startCycle(); }
+    var dt = Math.min(ts - lastTs, 50);
+    lastTs = ts;
+
+    // Fade in/out
+    if (fadeState === 'in') {
+      fadeT = Math.min(fadeT + dt / 400, 1);
+      ball.setAttribute('opacity', String(fadeT * 0.92));
+      trail.setAttribute('opacity', String(fadeT * 0.28));
+      if (fadeT >= 1) fadeState = 'visible';
+    } else if (fadeState === 'out') {
+      fadeT = Math.max(fadeT - dt / 500, 0);
+      ball.setAttribute('opacity', String(fadeT * 0.92));
+      trail.setAttribute('opacity', String(fadeT * 0.28));
+      if (fadeT <= 0) {
+        fadeState = 'wait';
+        waitUntil = ts + 600 + Math.random() * 400;
+      }
+    } else if (fadeState === 'wait') {
+      if (ts >= waitUntil) startCycle();
+      requestAnimationFrame(tick);
+      return;
+    }
+
+    // Check if we're at a pause point
+    if (currentPause >= 0) {
+      pauseElapsed += dt;
+      var pd = pauseSchedule[currentPause].duration;
+      var pt = Math.min(pauseElapsed / pd, 1);
+      var pulseT = pt < 0.5 ? pt * 2 : 2 - pt * 2;
+      var r = 5 + 2 * pulseT;
+      ball.setAttribute('r', String(r));
+      if (pauseElapsed >= pd) {
+        currentPause = -1;
+        ball.setAttribute('r', '5');
+      }
+      requestAnimationFrame(tick);
+      return;
+    }
+
+    // Advance along spline
+    currentDist += speed * dt;
+
+    // Check if we've hit a pause waypoint
+    for (var pi = 0; pi < pauseSchedule.length; pi++) {
+      var ps = pauseSchedule[pi];
+      if (currentDist >= ps.dist && currentDist - speed * dt < ps.dist) {
+        currentDist = ps.dist; // snap to exact pause point
+        currentPause = pi;
+        pauseElapsed = 0;
+        break;
+      }
+    }
+
+    if (currentDist >= totalLength) {
+      fadeState = 'out';
+      fadeT = 1;
+      currentDist = totalLength;
+    }
+
+    var pt = sampleAtDistance(splineSamples, arcLengths, currentDist);
+    ball.setAttribute('cx', pt.x);
+    ball.setAttribute('cy', pt.y);
+    ball.setAttribute('fill', pt.color);
+    ball.setAttribute('filter', filters[pt.color] || 'url(#glow-teal)');
+
+    // Trail with smooth damped following
+    var tLerp = 0.1;
+    trailX += (pt.x - trailX) * tLerp;
+    trailY += (pt.y - trailY) * tLerp;
+    trail.setAttribute('cx', trailX);
+    trail.setAttribute('cy', trailY);
+    trail.setAttribute('fill', pt.color);
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+})();
+
+// ============================================================
+// INIT
+// ============================================================
+buildTOC();
+updateProgress();
+</script>
+</body>
+</html>
